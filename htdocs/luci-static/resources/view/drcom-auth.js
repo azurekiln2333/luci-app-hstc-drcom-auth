@@ -86,6 +86,7 @@ return view.extend({
 				casUrlencoded: 'URL 编码',
 				casHeaders: '请求头',
 				casRequestBody: '完整请求体',
+				casRequestLine: '请求行',
 				casCopy: '复制',
 				casCopied: '已复制到剪贴板',
 				casCopyFailed: '复制失败，请手动选择复制',
@@ -168,6 +169,7 @@ return view.extend({
 				casUrlencoded: 'URL 編碼',
 				casHeaders: '請求標頭',
 				casRequestBody: '完整請求體',
+				casRequestLine: '請求行',
 				casCopy: '複製',
 				casCopied: '已複製到剪貼簿',
 				casCopyFailed: '複製失敗，請手動選取複製',
@@ -250,6 +252,7 @@ return view.extend({
 				casUrlencoded: 'URL Encoded',
 				casHeaders: 'Request Headers',
 				casRequestBody: 'Full Request Body',
+				casRequestLine: 'Request Line',
 				casCopy: 'Copy',
 				casCopied: 'Copied to clipboard',
 				casCopyFailed: 'Copy failed, select and copy manually',
@@ -380,6 +383,36 @@ return view.extend({
 			box.appendChild(casFieldRow(tr('casUrlencoded'), values.urlencoded || ''));
 			box.appendChild(casFieldRow(tr('casHeaders'), (values.headers || '').replace(/\|/g, '\n')));
 			box.appendChild(casFieldRow(tr('casRequestBody'), values.body || ''));
+			box.style.display = '';
+		};
+
+		// Render the raw HTTP request from `cas_params` (request line, headers
+		// and body) into copyable rows.
+		var renderCasRequest = function(raw) {
+			var box = document.getElementById('drcom-cas-body-box');
+			if (!box)
+				return;
+			var text = String(raw || '').replace(/\r/g, '');
+			var idx = text.indexOf('\n\n');
+			var head = idx >= 0 ? text.slice(0, idx) : text;
+			var body = idx >= 0 ? text.slice(idx + 2) : '';
+			var lines = head.split('\n');
+			var requestLine = lines.shift() || '';
+			var headers = lines.join('\n');
+
+			var bodyParams = {};
+			body.split('&').forEach(function(kv) {
+				var eq = kv.indexOf('=');
+				if (eq > 0)
+					bodyParams[kv.slice(0, eq)] = kv.slice(eq + 1);
+			});
+
+			box.innerHTML = '';
+			box.appendChild(casFieldRow(tr('casRequestLine'), requestLine));
+			box.appendChild(casFieldRow(tr('casHeaders'), headers));
+			if (bodyParams.password)
+				box.appendChild(casFieldRow(tr('casEncryptedPassword'), bodyParams.password));
+			box.appendChild(casFieldRow(tr('casRequestBody'), body));
 			box.style.display = '';
 		};
 
@@ -600,6 +633,8 @@ return view.extend({
 		};
 
 		// --- standalone CAS: fetch server-issued params ---
+		// On success this also assembles and shows the full request (headers +
+		// body) immediately, so no second click is needed.
 		o = s.option(form.Button, '_cas_params', tr('casParams'));
 		o.inputtitle = tr('fetchCasParams');
 		o.inputstyle = 'apply';
@@ -619,17 +654,30 @@ return view.extend({
 					return;
 				}
 				var failed = execFailed(res, execMessage(res));
-				var text = output ? casParamsText(output) : (execMessage(res) || tr('casParamsFailed'));
-				if (node)
-					node.textContent = text;
-				if (failed)
+				if (failed && !/\n---request---\n/.test(output)) {
+					if (node)
+						node.textContent = tr('casParamsFailed');
 					showDiag(tr('casParamsFailed'), output || execMessage(res));
+					return;
+				}
+
+				var paramsPart = output, requestPart = '';
+				var marker = output.indexOf('\n---request---\n');
+				if (marker >= 0) {
+					paramsPart = output.slice(0, marker).trim();
+					requestPart = output.slice(marker + '\n---request---\n'.length);
+					requestPart = requestPart.replace(/---end-request---[\s\S]*$/, '').trim();
+				}
+
+				if (node)
+					node.textContent = casParamsText(paramsPart);
+				if (requestPart)
+					renderCasRequest(requestPart);
 			}).catch(function(e) {
 				var node = document.getElementById('drcom-cas-params-status');
-				var message = execMessage(e) || tr('casParamsFailed');
 				if (node)
 					node.textContent = tr('casParamsFailed');
-				showDiag(tr('casParamsFailed'), message);
+				showDiag(tr('casParamsFailed'), execMessage(e));
 			});
 		};
 
@@ -639,12 +687,9 @@ return view.extend({
 			return '<span id="drcom-cas-params-status" class="drcom-result">' + tr('casParamsIdle') + '</span>';
 		};
 
-		// Show the assembled, url-encoded POST body (encrypted password +
-		// session params) so it can be inspected and copied.
-		o = s.option(form.Button, '_cas_body', tr('casBody'));
-		o.inputtitle = tr('showCasBody');
-		o.inputstyle = 'apply';
-		o.onclick = function() {
+		// Show the assembled request (headers + body) so it can be inspected and
+		// copied. Shared by the fetch-params flow and the explicit button.
+		var fetchAndShowCasBody = function() {
 			var box = document.getElementById('drcom-cas-body-box');
 			var status = document.getElementById('drcom-cas-body-status');
 			if (status)
@@ -654,9 +699,16 @@ return view.extend({
 
 			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_body' ]).then(function(res) {
 				var output = (res && res.stdout ? res.stdout : '').trim();
+				if (/^diagnosis=/m.test(output)) {
+					if (status)
+						status.textContent = '';
+					showDiag(tr('casBodyFailed'), output);
+					return;
+				}
 				if (execFailed(res, execMessage(res)) || !output) {
 					if (status)
-						status.textContent = tr('casBodyFailed') + ': ' + (execMessage(res) || '');
+						status.textContent = '';
+					showDiag(tr('casBodyFailed'), output || execMessage(res));
 					return;
 				}
 				if (status)
@@ -664,8 +716,16 @@ return view.extend({
 				renderCasBody(output);
 			}).catch(function(e) {
 				if (status)
-					status.textContent = tr('casBodyFailed') + ': ' + (execMessage(e) || '');
+					status.textContent = '';
+				showDiag(tr('casBodyFailed'), execMessage(e));
 			});
+		};
+
+		o = s.option(form.Button, '_cas_body', tr('casBody'));
+		o.inputtitle = tr('showCasBody');
+		o.inputstyle = 'apply';
+		o.onclick = function() {
+			return fetchAndShowCasBody();
 		};
 
 		o = s.option(form.DummyValue, '_cas_body_status', '');

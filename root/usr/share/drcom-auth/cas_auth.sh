@@ -480,6 +480,13 @@ cmd_params() {
 	printf 'geolocation=%s\n' "$CAS_GEOLOCATION"
 	printf 'captured=%s\n' "$CAS_PARAMS_TIME"
 	printf 'saved=%s\n' "$CAS_PARAMS_FILE"
+
+	# Also assemble the request in this same invocation so the caller gets the
+	# params AND the headers/body with a single round-trip. This avoids a second
+	# blocking LuCI exec (which made the panel appear frozen on slow links).
+	printf '\n---request---\n'
+	cmd_request_inner 2>&1 || true
+	printf '%s\n' '---end-request---'
 }
 
 cmd_login() {
