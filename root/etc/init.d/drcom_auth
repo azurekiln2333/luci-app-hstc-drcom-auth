@@ -8,7 +8,7 @@
 START=95
 STOP=10
 USE_PROCD=1
-EXTRA_COMMANDS="authorize ticket login cas_params cas_body cas_login cas_status cas_ensure public_key public_key_status"
+EXTRA_COMMANDS="authorize ticket login cas_params cas_body cas_login cas_status cas_ensure cas_logout public_key public_key_status"
 EXTRA_HELP="	authorize		Get the Dr.COM authorize URL only
 	ticket			Run the full Dr.COM login flow now
 	login			Alias of ticket
@@ -17,6 +17,7 @@ EXTRA_HELP="	authorize		Get the Dr.COM authorize URL only
 	cas_login		Perform a standalone CAS login (no Dr.COM)
 	cas_status		Show saved CAS parameters and cookie status
 	cas_ensure		CAS login only when the stored cookie is missing/expired
+	cas_logout		Clear the local CAS session (cookie and params)
 	public_key		Update the cached HSCAS RSA public key
 	public_key_status	Show cached HSCAS RSA public key status"
 
@@ -137,6 +138,12 @@ cas_status() {
 cas_ensure() {
 	write_config
 	/bin/sh "$APP_DIR/cas_auth.sh" ensure
+}
+
+# Clear the local CAS session so params can be fetched fresh again.
+cas_logout() {
+	write_config
+	/bin/sh "$APP_DIR/cas_auth.sh" logout
 }
 
 public_key() {

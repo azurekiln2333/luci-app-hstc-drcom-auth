@@ -90,6 +90,9 @@ return view.extend({
 				casCopy: '复制',
 				casCopied: '已复制到剪贴板',
 				casCopyFailed: '复制失败，请手动选择复制',
+				casLogout: '退出登录',
+				doCasLogout: '清除本地会话',
+				casLogoutDone: '已清除本地 CAS 会话。',
 				wanPort: 'WAN 接口',
 				deviceType: '设备类型',
 				pc: '电脑',
@@ -173,6 +176,9 @@ return view.extend({
 				casCopy: '複製',
 				casCopied: '已複製到剪貼簿',
 				casCopyFailed: '複製失敗，請手動選取複製',
+				casLogout: '登出',
+				doCasLogout: '清除本機會話',
+				casLogoutDone: '已清除本機 CAS 工作階段。',
 				wanPort: 'WAN 介面',
 				deviceType: '裝置類型',
 				pc: '電腦',
@@ -256,6 +262,9 @@ return view.extend({
 				casCopy: 'Copy',
 				casCopied: 'Copied to clipboard',
 				casCopyFailed: 'Copy failed, select and copy manually',
+				casLogout: 'Logout',
+				doCasLogout: 'Clear Local Session',
+				casLogoutDone: 'Local CAS session cleared.',
 				wanPort: 'WAN Interface',
 				deviceType: 'Device Type',
 				pc: 'PC',
@@ -775,10 +784,30 @@ return view.extend({
 			return refreshCasStatus();
 		};
 
+		// Clear the local CAS session so a fresh login page (with fm1 params)
+		// can be fetched again.
+		o = s.option(form.Button, '_cas_logout', tr('casLogout'));
+		o.inputtitle = tr('doCasLogout');
+		o.inputstyle = 'reset';
+		o.onclick = function() {
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_logout' ]).then(function() {
+				ui.addNotification(null, E('p', tr('casLogoutDone')));
+				return refreshCasStatus();
+			}).catch(function(e) {
+				showDiag(tr('casLogout'), execMessage(e));
+				return refreshCasStatus();
+			});
+		};
+
+		// --- Dr.COM authentication (kept separate from the CAS card) ---
+		s = m.section(form.TypedSection, 'drcom_auth', tr('auth'));
+		s.anonymous = true;
+		s.addremove = false;
+		s.description = tr('authDesc');
+
 		o = s.option(form.Button, '_auth', tr('auth'));
 		o.inputtitle = tr('auth');
 		o.inputstyle = 'apply';
-		o.description = tr('authDesc');
 		o.onclick = function() {
 			var node = document.getElementById('drcom-auth-status');
 			if (node)

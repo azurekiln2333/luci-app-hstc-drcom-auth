@@ -1,8 +1,7 @@
 #!/bin/sh
-# Unit test for cas_urlencode (pure-shell implementation, no od/awk/sed).
+# Unit test for cas_urlencode (awk-based, LC_ALL=C byte-oriented).
 SRC="$(cd "$(dirname "$0")/.." && pwd)/root/usr/share/drcom-auth/cas_auth.sh"
-eval "$(sed -n '/^_cas_urlencode_str() {/,/^}/p' "$SRC")"
-cas_urlencode() { _cas_urlencode_str "$1"; }
+eval "$(sed -n '/^cas_urlencode() {/,/^}/p' "$SRC")"
 
 check() {
 	got=$(cas_urlencode "$1")
@@ -21,7 +20,6 @@ check "a b/c" "a+b%2Fc" || fail=1
 check "AAA==" "AAA%3D%3D" || fail=1
 check "+/\\" "%2B%2F%5C" || fail=1
 check "202411039159" "202411039159" || fail=1
-# A realistic execution token fragment.
 check "ab12-CD_" "ab12-CD_" || fail=1
 
 [ "$fail" -eq 0 ] && echo "ALL PASS" || echo "SOME FAILED"

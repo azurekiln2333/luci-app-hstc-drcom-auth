@@ -14,3 +14,8 @@ release/verify-ipk/
 # Editor / OS noise
 .DS_Store
 Thumbs.db
+
+# Local session tooling (SSH helpers, npm deps) kept out of the package repo
+/tools/
+node_modules/
+package-lock.json

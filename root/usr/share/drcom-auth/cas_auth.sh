@@ -151,6 +151,18 @@ fetch_cas_params() {
 
 	CAS_EXECUTION=$(cas_form_field "$CAS_LOGIN_FORM_ID" execution)
 	if [ -z "$CAS_EXECUTION" ]; then
+		# A logged-in session redirects /cas/login to a success page that has
+		# no fm1 form. That is not an error; report it clearly.
+		if grep -q -iE 'successRedirectUrl|Log In Successful|登录成功' "$CAS_LOGIN_PAGE" 2>/dev/null; then
+			cas_log "already logged in; login page returned a success page (HTTP $http_code)"
+			printf 'diagnosis=already logged in\n'
+			printf 'hint=%s\n' "CAS session is active; the login page shows a success page instead of the form"
+			printf 'http_code=%s\n' "$http_code"
+			printf 'page_size=%s\n' "$page_size"
+			printf 'page_saved=%s\n' "$CAS_LOGIN_PAGE"
+			printf 'page_head=%s\n' "$(head -c 300 "$CAS_LOGIN_PAGE" 2>/dev/null | tr '\n' ' ')"
+			return 2
+		fi
 		cas_log "failed: execution token not found in form $CAS_LOGIN_FORM_ID (HTTP $http_code, page ${page_size}B)"
 		printf 'diagnosis=login form %s not found in page\n' "$CAS_LOGIN_FORM_ID"
 		printf 'http_code=%s\n' "$http_code"
@@ -215,6 +227,17 @@ params_age() {
 	printf '%s\n' "$((now - CAS_CAPTURED_EPOCH))"
 }
 
+# Base64-encode stdin. Prefer a `base64` command, fall back to `openssl base64`
+# (openssl is already a hard runtime requirement) because some stripped-down
+# images ship neither coreutils-base64 nor busybox base64.
+cas_base64() {
+	if command -v base64 >/dev/null 2>&1; then
+		base64 | tr -d '\r\n'
+	else
+		openssl base64 -A 2>/dev/null | tr -d '\r\n'
+	fi
+}
+
 # --- step 3+4: RSA-encrypt the password and POST ----------------------------
 rsa_encrypt_password() {
 	local encrypted
@@ -246,12 +269,12 @@ rsa_encrypt_password() {
 
 	# CAS expects the password RSA-encrypted with PKCS#1 v1.5 padding, base64
 	# encoded, prefixed with __RSA__ (mirrors JSEncrypt in the login page).
-	if encrypted=$(printf "%s" "$PASSWORD" | openssl pkeyutl -encrypt -pubin -inkey "$CAS_PUBLIC_KEY_FILE" -pkeyopt rsa_padding_mode:pkcs1 2>/dev/null | base64 | tr -d '\r\n'); then
+	if encrypted=$(printf "%s" "$PASSWORD" | openssl pkeyutl -encrypt -pubin -inkey "$CAS_PUBLIC_KEY_FILE" -pkeyopt rsa_padding_mode:pkcs1 2>/dev/null | cas_base64); then
 		printf "%s\n" "__RSA__$encrypted"
 		return 0
 	fi
 
-	if encrypted=$(printf "%s" "$PASSWORD" | openssl rsautl -encrypt -pubin -inkey "$CAS_PUBLIC_KEY_FILE" -pkcs 2>/dev/null | base64 | tr -d '\r\n'); then
+	if encrypted=$(printf "%s" "$PASSWORD" | openssl rsautl -encrypt -pubin -inkey "$CAS_PUBLIC_KEY_FILE" -pkcs 2>/dev/null | cas_base64); then
 		printf "%s\n" "__RSA__$encrypted"
 		return 0
 	fi
@@ -261,49 +284,33 @@ rsa_encrypt_password() {
 }
 
 # Percent-encode a value for application/x-www-form-urlencoded bodies, matching
-# curl --data-urlencode semantics (space -> +, unreserved bytes kept as-is).
+# curl --data-urlencode semantics (space -> +, unreserved chars kept as-is).
 #
-# Implemented with POSIX parameter expansion only: no od, awk, sed or locale
-# dependency. This matters on stripped-down OpenWrt images where od/awk may be
-# missing, which previously made this function return an empty string and sent
-# an empty `execution` field to CAS (HTTP 500 BadlyFormattedFlowExecutionKey).
-#
-# Input is treated byte-wise: each character is mapped to its byte value with
-# printf '%d' "'$c" which BusyBox ash supports. Bytes >= 0x80 are handled as
-# UTF-8 lead/continuation bytes naturally because each char in a multibyte
-# sequence is iterated separately by ${var#?} in a C locale.
+# Implemented in awk under LC_ALL=C so it is byte-oriented (correct UTF-8) and
+# FAST: a previous pure-shell version forked per character and took over a
+# minute on a 5 KB execution token, freezing the LuCI panel. Requires awk
+# (present on OpenWrt via busybox) but no od/sed/base64.
 cas_urlencode() {
-	_cas_urlencode_str "$1"
-}
-
-# Internal worker; broken out so the loop variable stays local.
-_cas_urlencode_str() {
-	_cue_in="$1"
-	_cue_out=""
-	while [ -n "$_cue_in" ]; do
-		_cue_c=${_cue_in%"${_cue_in#?}"}      # first character
-		_cue_in=${_cue_in#?}                    # rest
-		case "$_cue_c" in
-			[A-Za-z0-9.\-_~])
-				_cue_out="$_cue_out$_cue_c"
-				;;
-			" ")
-				_cue_out="$_cue_out+"
-				;;
-			*)
-				# Byte value of the character. printf %d "'<char>" yields the
-				# value of the first byte, which is exactly what we need for
-				# percent-encoding UTF-8 byte by byte.
-				_cue_n=$(printf '%d' "'$_cue_c" 2>/dev/null)
-				case "$_cue_n" in
-					''|*[!0-9]*) _cue_n=63 ;;   # fall back to '?' on failure
-				esac
-				[ "$_cue_n" -gt 255 ] 2>/dev/null && _cue_n=$((_cue_n % 256))
-				_cue_out="$_cue_out$(printf '%%%02X' "$_cue_n")"
-				;;
-		esac
-	done
-	printf '%s' "$_cue_out"
+	printf '%s' "$1" | LC_ALL=C awk '
+		BEGIN {
+			for (i = 0; i < 256; i++)
+				hx[sprintf("%c", i)] = sprintf("%%%02X", i)
+		}
+		{
+			n = length($0)
+			out = ""
+			for (i = 1; i <= n; i++) {
+				c = substr($0, i, 1)
+				if (c ~ /[A-Za-z0-9._~-]/)
+					out = out c
+				else if (c == " ")
+					out = out "+"
+				else
+					out = out hx[c]
+			}
+			printf "%s", out
+		}
+	'
 }
 
 # Build the exact POST body that perform_cas_login() sends. Stored in
@@ -469,8 +476,12 @@ cas_cookie_valid() {
 # --- sub-commands -----------------------------------------------------------
 cmd_params() {
 	# On failure the diagnosis lines were already printed to stdout so the
-	# caller (LuCI) can show the real reason.
-	fetch_cas_params || return 1
+	# caller (LuCI) can show the real reason. Return code 2 means "already
+	# logged in": report it and stop, there are no form params to emit.
+	fetch_cas_params
+	rc=$?
+	[ "$rc" -eq 2 ] && return 0
+	[ "$rc" -eq 0 ] || return 1
 	printf 'form=%s\n' "$CAS_LOGIN_FORM_ID"
 	printf 'execution=%s\n' "$CAS_EXECUTION"
 	printf 'currentMenu=%s\n' "$CAS_CURRENT_MENU"
@@ -490,7 +501,7 @@ cmd_params() {
 }
 
 cmd_login() {
-	local age
+	local age rc
 	# Reuse the params captured by `params` when they are still fresh, so the
 	# panel flow (fetch -> login) uses exactly the values that were displayed
 	# and persisted. Refetch only when none exist or they look stale.
@@ -501,10 +512,17 @@ cmd_login() {
 				cas_log "reusing persisted params (age ${age}s)"
 			else
 				cas_log "persisted params are ${age}s old; refetching"
-				fetch_cas_params || return 1
+				fetch_cas_params
+				rc=$?
+				# rc=2: already logged in server-side, nothing left to do.
+				[ "$rc" -eq 2 ] && return 0
+				[ "$rc" -eq 0 ] || return 1
 			fi
 		else
-			fetch_cas_params || return 1
+			fetch_cas_params
+			rc=$?
+			[ "$rc" -eq 2 ] && return 0
+			[ "$rc" -eq 0 ] || return 1
 		fi
 	fi
 	perform_cas_login
@@ -556,15 +574,33 @@ cmd_status() {
 }
 
 cmd_ensure() {
+	local rc
 	if cas_cookie_valid; then
 		printf 'cookie=valid\n'
 		return 0
 	fi
 
 	cas_log "cookie missing or expired; re-authenticating"
-	# Refresh the server-issued params, then log in with them.
-	fetch_cas_params || return 1
+	# Refresh the server-issued params, then log in with them. rc=2 means the
+	# CAS server already considers the client logged in (session active).
+	fetch_cas_params
+	rc=$?
+	[ "$rc" -eq 2 ] && return 0
+	[ "$rc" -eq 0 ] || return 1
 	perform_cas_login
+}
+
+# Drop the local CAS session so a fresh login page (and fm1 params) can be
+# fetched again. Best-effort server-side logout is attempted first.
+cmd_logout() {
+	if [ -s "$CAS_COOKIE_FILE" ]; then
+		curl --connect-timeout "$CAS_CONNECT_TIMEOUT" --max-time "$CAS_MAX_TIME" \
+			-s -L -b "$CAS_COOKIE_FILE" "$HSCAS_BASE_URL/cas/logout" >/dev/null 2>&1 || true
+	fi
+	rm -f "$CAS_COOKIE_FILE" "$CAS_PARAMS_FILE" "$COOKIE_DIR/cas_state.env"
+	: > "$CAS_COOKIE_FILE"
+	cas_log "logged out, cleared CAS cookie and params"
+	printf 'cookie=cleared\n'
 }
 
 CMD="${1:-status}"
@@ -575,8 +611,9 @@ case "$CMD" in
 	login) cmd_login ;;
 	status) cmd_status ;;
 	ensure) cmd_ensure ;;
+	logout) cmd_logout ;;
 	*)
-		echo "usage: $0 {params|body|request|login|status|ensure}" >&2
+		echo "usage: $0 {params|body|request|login|status|ensure|logout}" >&2
 		exit 2
 		;;
 esac

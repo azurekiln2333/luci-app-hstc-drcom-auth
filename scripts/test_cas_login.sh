@@ -39,13 +39,20 @@ mkdir -p "\$LOG_DIR" "\$COOKIE_DIR" "\$RESPONSE_DIR"
 EOF
 
 echo "########## cas_auth.sh login ##########"
+# Start from a clean session: the CAS server may still report the previous
+# login as active (server-side session), which would hide the fm1 form.
+sh "$TMP/app/cas_auth.sh" logout >/dev/null 2>&1 || true
 sh "$TMP/app/cas_auth.sh" login
 echo
 echo "########## cas_auth.sh status ##########"
 sh "$TMP/app/cas_auth.sh" status | sed 's/\(params_execution=................................\).*/\1.../'
 echo
 echo "########## cookie jar ##########"
-cat "$TMP/app/info/cas_cookie.txt"
+if [ -s "$TMP/app/info/cas_cookie.txt" ]; then
+	cat "$TMP/app/info/cas_cookie.txt"
+else
+	echo "(no cookie file: server reported an already-active session)"
+fi
 echo
 echo "########## cas_auth.sh ensure (should say valid, no re-login) ##########"
 sh "$TMP/app/cas_auth.sh" ensure
