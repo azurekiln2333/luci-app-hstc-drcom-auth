@@ -82,17 +82,47 @@ cas_form_field() {
 
 # --- step 1+2: fetch the login page and the fm1 params ----------------------
 fetch_cas_params() {
-	local http_code
+	local http_code curl_rc page_size
 
 	mkdir -p "$COOKIE_DIR" "$RESPONSE_DIR"
 	cas_log "GET $HSCAS_LOGIN_URL (no service parameter)"
+
+	# Capture curl's exit status and stderr separately so failures are visible.
+	curl_rc=0
 	http_code=$(curl -L -c "$CAS_COOKIE_FILE" -b "$CAS_COOKIE_FILE" \
-		-H "User-Agent: $USER_AGENT" -s -o "$CAS_LOGIN_PAGE" -w "%{http_code}" \
-		"$HSCAS_LOGIN_URL")
+		-H "User-Agent: $USER_AGENT" -s -S -o "$CAS_LOGIN_PAGE" \
+		-w "%{http_code}" "$HSCAS_LOGIN_URL" 2>"$COOKIE_DIR/cas_curl_error.txt") || curl_rc=$?
+
+	# Ensure the output file exists before wc; curl may not create it on failure.
+	[ -f "$CAS_LOGIN_PAGE" ] || : > "$CAS_LOGIN_PAGE"
+	page_size=$(wc -c < "$CAS_LOGIN_PAGE" 2>/dev/null || echo 0)
+
+	if [ "$curl_rc" -ne 0 ]; then
+		cas_log "failed: curl exit $curl_rc; $(cat "$COOKIE_DIR/cas_curl_error.txt" 2>/dev/null)"
+		printf 'diagnosis=curl failed (exit %s)\n' "$curl_rc"
+		printf 'curl_error=%s\n' "$(cat "$COOKIE_DIR/cas_curl_error.txt" 2>/dev/null)"
+		printf 'url=%s\n' "$HSCAS_LOGIN_URL"
+		return 1
+	fi
+
+	if [ "$http_code" != "200" ]; then
+		cas_log "failed: unexpected HTTP $http_code from $HSCAS_LOGIN_URL (page ${page_size}B)"
+		printf 'diagnosis=unexpected HTTP status\n'
+		printf 'http_code=%s\n' "$http_code"
+		printf 'url=%s\n' "$HSCAS_LOGIN_URL"
+		printf 'page_saved=%s\n' "$CAS_LOGIN_PAGE"
+		return 1
+	fi
 
 	CAS_EXECUTION=$(cas_form_field "$CAS_LOGIN_FORM_ID" execution)
 	if [ -z "$CAS_EXECUTION" ]; then
-		cas_log "failed: execution token not found in form $CAS_LOGIN_FORM_ID (HTTP $http_code)"
+		cas_log "failed: execution token not found in form $CAS_LOGIN_FORM_ID (HTTP $http_code, page ${page_size}B)"
+		printf 'diagnosis=login form %s not found in page\n' "$CAS_LOGIN_FORM_ID"
+		printf 'http_code=%s\n' "$http_code"
+		printf 'page_size=%s\n' "$page_size"
+		printf 'page_saved=%s\n' "$CAS_LOGIN_PAGE"
+		# First line of the page often explains why (redirect page, error, WAF).
+		printf 'page_head=%s\n' "$(head -c 300 "$CAS_LOGIN_PAGE" 2>/dev/null | tr '\n' ' ')"
 		return 1
 	fi
 	CAS_CURRENT_MENU=$(cas_form_field "$CAS_LOGIN_FORM_ID" currentMenu)
@@ -269,6 +299,11 @@ perform_cas_login() {
 
 	cas_log "CAS login rejected (HTTP $http_code)"
 	persist_cas_state "$(date '+%Y-%m-%d %H:%M:%S')" "rejected" "$http_code"
+	printf 'diagnosis=login rejected by CAS\n'
+	printf 'http_code=%s\n' "$http_code"
+	printf 'login_url=%s\n' "$HSCAS_LOGIN_URL"
+	printf 'page_saved=%s\n' "$CAS_POST_BODY"
+	printf 'page_head=%s\n' "$(head -c 400 "$CAS_POST_BODY" 2>/dev/null | tr '\n' ' ')"
 	return 3
 }
 
@@ -317,6 +352,8 @@ cas_cookie_valid() {
 
 # --- sub-commands -----------------------------------------------------------
 cmd_params() {
+	# On failure the diagnosis lines were already printed to stdout so the
+	# caller (LuCI) can show the real reason.
 	fetch_cas_params || return 1
 	printf 'form=%s\n' "$CAS_LOGIN_FORM_ID"
 	printf 'execution=%s\n' "$CAS_EXECUTION"

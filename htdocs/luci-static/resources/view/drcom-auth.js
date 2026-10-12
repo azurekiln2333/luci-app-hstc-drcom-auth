@@ -341,6 +341,22 @@ return view.extend({
 				values._eventId || '?',
 				shortExec);
 		};
+		// Render a failure diagnosis in the shared detail box so the raw output
+		// (HTTP code, curl error, page head, saved paths) is visible to the user.
+		var showDiag = function(title, text) {
+			var box = document.getElementById('drcom-cas-body-box');
+			if (box) {
+				box.innerHTML = '';
+				box.appendChild(E('div', { 'class': 'drcom-diag-title' }, [ title ]));
+				box.appendChild(E('pre', { 'class': 'drcom-diag-pre' }, [ String(text || '') ]));
+				box.style.display = '';
+			}
+			ui.addNotification(null, E('div', {}, [
+				E('p', {}, [ title ]),
+				E('pre', { 'class': 'drcom-diag-pre' }, [ String(text || '') ])
+			]), 'error');
+		};
+
 		// Render the `cas_body` key=value output: a copyable encrypted password
 		// row and the full url-encoded request body.
 		var renderCasBody = function(raw) {
@@ -461,7 +477,9 @@ return view.extend({
 			'.drcom-body-label{flex:0 0 150px;font-weight:600;padding-top:6px}',
 			'.drcom-body-value{flex:1 1 auto;min-width:0}',
 			'.drcom-body-field{width:100%;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;resize:vertical}',
-			'.drcom-body-row .cbi-button{flex:0 0 auto}'
+			'.drcom-body-row .cbi-button{flex:0 0 auto}',
+			'.drcom-diag-title{font-weight:600;margin-bottom:4px}',
+			'.drcom-diag-pre{background:#2b2b2b;color:#eee;padding:8px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;margin:0}'
 		].join('\n'));
 
 		s = m.section(form.TypedSection, 'drcom_auth', tr('basic'));
@@ -589,18 +607,25 @@ return view.extend({
 			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_params' ]).then(function(res) {
 				var node = document.getElementById('drcom-cas-params-status');
 				var output = (res && res.stdout ? res.stdout : '').trim();
+				// A diagnosis= line means the script reported a structured failure.
+				if (/^diagnosis=/m.test(output)) {
+					if (node)
+						node.textContent = tr('casParamsFailed');
+					showDiag(tr('casParamsFailed'), output);
+					return;
+				}
 				var failed = execFailed(res, execMessage(res));
 				var text = output ? casParamsText(output) : (execMessage(res) || tr('casParamsFailed'));
 				if (node)
 					node.textContent = text;
 				if (failed)
-					ui.addNotification(null, E('p', execMessage(res) || tr('casParamsFailed')), 'error');
+					showDiag(tr('casParamsFailed'), output || execMessage(res));
 			}).catch(function(e) {
 				var node = document.getElementById('drcom-cas-params-status');
 				var message = execMessage(e) || tr('casParamsFailed');
 				if (node)
-					node.textContent = tr('casParamsFailed') + ': ' + message;
-				ui.addNotification(null, E('p', message), 'error');
+					node.textContent = tr('casParamsFailed');
+				showDiag(tr('casParamsFailed'), message);
 			});
 		};
 
@@ -656,15 +681,19 @@ return view.extend({
 				node.textContent = tr('casLoggingIn');
 
 			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_login' ]).then(function(res) {
+				var output = (res && res.stdout ? res.stdout : '').trim();
 				var message = execMessage(res);
 				var failed = execFailed(res, message);
 				var text = failed ? tr('casLoginFailed') + (message ? ': ' + message : '')
 					: tr('casLoginDone');
-				ui.addNotification(null, E('p', text), failed ? 'error' : undefined);
+				if (failed)
+					showDiag(tr('casLoginFailed'), output || message);
+				else
+					ui.addNotification(null, E('p', text));
 				return refreshCasStatus();
 			}).catch(function(e) {
 				var message = execMessage(e) || tr('casLoginFailed');
-				ui.addNotification(null, E('p', message), 'error');
+				showDiag(tr('casLoginFailed'), message);
 				return refreshCasStatus();
 			});
 		};
