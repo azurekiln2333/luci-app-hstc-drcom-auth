@@ -19,3 +19,19 @@ Thumbs.db
 /tools/
 node_modules/
 package-lock.json
+
+# AI/agent tooling directories (per-platform), not part of the package
+/.agent/
+/.agents/
+/.claude/
+/.codebuddy/
+/.codex/
+/.cursor/
+/.dsh/
+/.gemini/
+/.opencode/
+/.pi/
+/.trae/
+/.zcode/
+/.trellis/
+/AGENTS.md

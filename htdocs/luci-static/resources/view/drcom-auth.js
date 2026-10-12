@@ -67,10 +67,11 @@ return view.extend({
 				casLoggingIn: '登录中...',
 				casLoginDone: 'CAS 登录成功，Cookie 已保存。',
 				casLoginFailed: 'CAS 登录失败',
-				casCookieStatus: 'Cookie 状态',
+				casCookieStatus: '登录状态',
 				casCookieUnknown: '未检测',
-				casCookieValid: '有效（%s）',
-				casCookieInvalid: '无效或已过期，请重新登录',
+				casSessionActive: '已登录（Cookie 有效：%s）',
+				casSessionActiveRemote: '已登录（服务端会话有效）',
+				casSessionInactive: '未登录',
 				casRefresh: 'Cookie 状态',
 				refreshCasStatus: '刷新状态',
 				authDesc: '使用 Dr.COM 网页授权链接完成完整认证（需先获取授权链接）。',
@@ -144,10 +145,11 @@ return view.extend({
 				casLoggingIn: '登入中...',
 				casLoginDone: 'CAS 登入成功，Cookie 已儲存。',
 				casLoginFailed: 'CAS 登入失敗',
-				casCookieStatus: 'Cookie 狀態',
+				casCookieStatus: '登入狀態',
 				casCookieUnknown: '未偵測',
-				casCookieValid: '有效（%s）',
-				casCookieInvalid: '無效或已過期，請重新登入',
+				casSessionActive: '已登入（Cookie 有效：%s）',
+				casSessionActiveRemote: '已登入（伺服器工作階段有效）',
+				casSessionInactive: '未登入',
 				casRefresh: 'Cookie 狀態',
 				refreshCasStatus: '重新整理狀態',
 				authDesc: '使用 Dr.COM 網頁授權連結完成完整認證（需先取得授權連結）。',
@@ -221,10 +223,11 @@ return view.extend({
 				casLoggingIn: 'Logging in...',
 				casLoginDone: 'CAS login succeeded, cookie saved.',
 				casLoginFailed: 'CAS login failed',
-				casCookieStatus: 'Cookie Status',
+				casCookieStatus: 'Login Status',
 				casCookieUnknown: 'Not checked',
-				casCookieValid: 'Valid (%s)',
-				casCookieInvalid: 'Invalid or expired; log in again',
+				casSessionActive: 'Logged in (cookie valid: %s)',
+				casSessionActiveRemote: 'Logged in (server session active)',
+				casSessionInactive: 'Not logged in',
 				casRefresh: 'Cookie Status',
 				refreshCasStatus: 'Refresh Status',
 				authDesc: 'Complete the full Dr.COM flow using the web authorize URL (fetch it first).',
@@ -436,10 +439,17 @@ return view.extend({
 
 				var cookieNode = document.getElementById('drcom-cas-cookie-status');
 				if (cookieNode) {
-					if (values.cookie === 'valid')
-						cookieNode.textContent = format(tr('casCookieValid'), values.COOKIE_MTIME || '?');
+					// Use the single coherent session state so the panel can never
+					// claim "invalid" while the server still holds a session.
+					var state = values.session || 'unknown';
+					if (state === 'active')
+						cookieNode.textContent = values.cookie === 'valid'
+							? format(tr('casSessionActive'), values.COOKIE_MTIME || '?')
+							: tr('casSessionActiveRemote');
+					else if (state === 'inactive')
+						cookieNode.textContent = tr('casSessionInactive');
 					else
-						cookieNode.textContent = tr('casCookieInvalid');
+						cookieNode.textContent = tr('casCookieUnknown');
 				}
 
 				// Show the assembled request inline (no button needed).

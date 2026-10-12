@@ -473,6 +473,52 @@ cas_cookie_valid() {
 	return 0
 }
 
+# Ask the CAS server whether our current cookie jar already has an active
+# session. The server redirects /cas/login to a success page (no fm1 form) when
+# a session exists. Echoes one of: active | inactive | unknown.
+cas_server_session_state() {
+	local http_code page
+
+	page=$(mktemp)
+	http_code=$(curl --connect-timeout "$CAS_CONNECT_TIMEOUT" --max-time "$CAS_MAX_TIME" \
+		-L -b "$CAS_COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s \
+		-o "$page" -w "%{http_code}" "$HSCAS_LOGIN_URL" 2>/dev/null) || {
+		rm -f "$page"
+		printf 'unknown\n'
+		return 0
+	}
+
+	if [ "$http_code" != "200" ]; then
+		rm -f "$page"
+		printf 'unknown\n'
+		return 0
+	fi
+
+	if grep -q 'id="fm1"' "$page" 2>/dev/null; then
+		printf 'inactive\n'
+	elif grep -q -iE 'successRedirectUrl|Log In Successful|登录成功' "$page" 2>/dev/null; then
+		printf 'active\n'
+	else
+		printf 'unknown\n'
+	fi
+	rm -f "$page"
+}
+
+# Single coherent session state for the panel. Combines the local cookie with
+# the server view so the UI can never claim "cookie invalid" while the server
+# still holds a live session. Echoes: active | inactive | unknown.
+cas_session_state() {
+	local server
+
+	if cas_cookie_valid; then
+		printf 'active\n'
+		return 0
+	fi
+
+	server=$(cas_server_session_state)
+	printf '%s\n' "$server"
+}
+
 # --- sub-commands -----------------------------------------------------------
 cmd_params() {
 	# On failure the diagnosis lines were already printed to stdout so the
@@ -544,7 +590,7 @@ cmd_body() {
 }
 
 cmd_status() {
-	local state_file="$COOKIE_DIR/cas_state.env"
+	local state_file="$COOKIE_DIR/cas_state.env" session
 
 	printf 'login_url=%s\n' "$HSCAS_LOGIN_URL"
 
@@ -566,8 +612,13 @@ cmd_status() {
 
 	if cas_cookie_valid; then
 		printf 'cookie=valid\n'
+		printf 'session=active\n'
 	else
-		printf 'cookie=invalid\n'
+		# No usable local cookie. Ask the server before declaring anything, so
+		# we never show "cookie invalid" while a session is actually active.
+		session=$(cas_server_session_state)
+		printf 'cookie=absent\n'
+		printf 'session=%s\n' "$session"
 	fi
 	cas_cookie_summary
 
