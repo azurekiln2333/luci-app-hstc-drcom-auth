@@ -1,0 +1,16 @@
+# Build / packaging output
+release/*.ipk
+release/*.sha256.txt
+release/ipk-debug/
+release/verify-ipk/
+
+# Runtime artifacts copied off a router for debugging
+/logs/
+/info/
+/responses/
+/config.sh
+*.lock
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db

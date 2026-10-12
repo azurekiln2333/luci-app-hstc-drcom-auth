@@ -1,0 +1,140 @@
+#!/bin/sh /etc/rc.common
+# procd service for HSTC Dr.COM authentication.
+#
+# Renders /etc/config/drcom_auth into /usr/share/drcom-auth/config.sh and then
+# runs check_network.sh on an interval. Extra commands expose the individual
+# auth stages for the LuCI panel.
+
+START=95
+STOP=10
+USE_PROCD=1
+EXTRA_COMMANDS="authorize ticket login public_key public_key_status"
+EXTRA_HELP="	authorize		Get the Dr.COM authorize URL only
+	ticket			Run the full login flow now
+	login			Alias of ticket
+	public_key		Update the cached HSCAS RSA public key
+	public_key_status	Show cached HSCAS RSA public key status"
+
+APP_DIR="/usr/share/drcom-auth"
+CONFIG_FILE="$APP_DIR/config.sh"
+TEMPLATE_FILE="$APP_DIR/config.sh.template"
+
+uci_get() {
+	config_get "$1" main "$2" "$3"
+}
+
+# Escape a value for use inside a double-quoted shell assignment.
+sed_escape() {
+	printf "%s" "$1" | sed -e 's/[\\&|]/\\&/g'
+}
+
+# Render the runtime config from UCI using the shipped template.
+write_config() {
+	local enabled wan_port username password drcom_server_ip hscas_url
+	local hscas_public_key_url mac_type user_agent ping_host
+
+	config_load drcom_auth
+	uci_get enabled enabled 0
+	uci_get wan_port wan_port eth1
+	uci_get username username ""
+	uci_get password password ""
+	uci_get drcom_server_ip drcom_server_ip 192.168.2.34
+	uci_get hscas_url hscas_url https://hscas.hstc.edu.cn
+	uci_get hscas_public_key_url hscas_public_key_url "$hscas_url/cas/jwt/publicKey"
+	uci_get mac_type mac_type 2
+	uci_get user_agent user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36"
+	uci_get ping_host ping_host baidu.com
+
+	mkdir -p "$APP_DIR/logs" "$APP_DIR/info" "$APP_DIR/responses"
+
+	sed \
+		-e "s|__SCRIPT_DIR__|$(sed_escape "$APP_DIR")|g" \
+		-e "s|__USER_AGENT__|$(sed_escape "$user_agent")|g" \
+		-e "s|__WAN_PORT__|$(sed_escape "$wan_port")|g" \
+		-e "s|__DRCOM_SERVER_IP__|$(sed_escape "$drcom_server_ip")|g" \
+		-e "s|__HSCAS_URL__|$(sed_escape "$hscas_url")|g" \
+		-e "s|__HSCAS_PUBLIC_KEY_URL__|$(sed_escape "$hscas_public_key_url")|g" \
+		-e "s|__MAC_TYPE__|$(sed_escape "$mac_type")|g" \
+		-e "s|__USERNAME__|$(sed_escape "$username")|g" \
+		-e "s|__PASSWORD__|$(sed_escape "$password")|g" \
+		-e "s|__PING_HOST__|$(sed_escape "$ping_host")|g" \
+		"$TEMPLATE_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+	chmod 600 "$CONFIG_FILE"
+}
+
+start_service() {
+	local enabled check_interval
+
+	config_load drcom_auth
+	config_get_bool enabled main enabled 0
+	[ "$enabled" -eq 1 ] || return 0
+	config_get check_interval main check_interval 60
+
+	write_config
+
+	procd_open_instance
+	procd_set_param command /bin/sh -c "while true; do /bin/sh \"$APP_DIR/check_network.sh\"; sleep \"$check_interval\"; done"
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+reload_service() {
+	stop
+	start
+}
+
+authorize() {
+	write_config
+	/bin/sh "$APP_DIR/get_authorize_url.sh"
+}
+
+ticket() {
+	write_config
+	/bin/sh "$APP_DIR/auto_login_and_verify.sh" >/dev/null
+}
+
+login() {
+	ticket "$@"
+}
+
+public_key() {
+	local tmp code
+
+	write_config
+	. "$CONFIG_FILE"
+	mkdir -p "$COOKIE_DIR"
+	tmp="$PUBLIC_KEY_FILE.tmp"
+
+	code=$(curl -L -H "User-Agent: $USER_AGENT" -s -o "$tmp" -w "%{http_code}" "$HSCAS_PUBLIC_KEY_URL")
+	if [ "$code" = "200" ] && grep -q "BEGIN PUBLIC KEY" "$tmp"; then
+		mv "$tmp" "$PUBLIC_KEY_FILE"
+		chmod 600 "$PUBLIC_KEY_FILE"
+		public_key_status
+		return 0
+	fi
+
+	rm -f "$tmp"
+	printf "%s\n" "Update public key failed: $HSCAS_PUBLIC_KEY_URL (HTTP ${code:-unknown})" >&2
+	return 1
+}
+
+public_key_status() {
+	local mtime
+
+	write_config
+	. "$CONFIG_FILE"
+
+	if [ ! -s "$PUBLIC_KEY_FILE" ]; then
+		return 0
+	fi
+
+	mtime=$(stat -c "%y" "$PUBLIC_KEY_FILE" 2>/dev/null | sed 's/\..*//')
+	[ -n "$mtime" ] || mtime=$(ls -l "$PUBLIC_KEY_FILE" 2>/dev/null | awk '{print $6" "$7" "$8}')
+	printf "%s\t%s\t%s\n" "updated" "$mtime" "$PUBLIC_KEY_FILE"
+}
+
+boot() {
+	start
+}

@@ -1,0 +1,17 @@
+{
+	"luci-app-drcom-auth": {
+		"description": "Grant access to Dr.COM auth configuration",
+		"read": {
+			"uci": [ "drcom_auth" ],
+			"file": {
+				"/etc/init.d/drcom_auth": [ "exec" ]
+			}
+		},
+		"write": {
+			"uci": [ "drcom_auth" ],
+			"file": {
+				"/etc/init.d/drcom_auth": [ "exec" ]
+			}
+		}
+	}
+}

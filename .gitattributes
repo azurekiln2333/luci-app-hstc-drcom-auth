@@ -1,0 +1,19 @@
+# Shell scripts, Lua/JS/JSON and package metadata must stay LF so they work on
+# OpenWrt and inside the .ipk tarballs.
+*.sh        text eol=lf
+*.json      text eol=lf
+*.js        text eol=lf
+*.md        text eol=lf
+*.ps1       text eol=lf
+*.pem       text eol=lf
+Makefile    text eol=lf
+*.template  text eol=lf
+
+# UCI config and dotfiles must stay LF too.
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+root/etc/config/* text eol=lf
+root/etc/init.d/* text eol=lf
+
+*.ipk       binary
+*.png       binary
