@@ -27,6 +27,11 @@ return view.extend({
 				title: 'Dr.COM 认证',
 				desc: '配置校园网认证与自动重连。',
 				basic: '基础设置',
+				account: '账号密码',
+				settings: '设置',
+				tabOnline: '上网认证',
+				tabDiag: '诊断',
+				tabSettings: '设置',
 				authorize: '网页授权链接获取',
 				authorizeStep: '上网第一步',
 				getAuthorize: '获取网页授权链接',
@@ -105,6 +110,11 @@ return view.extend({
 				title: 'Dr.COM 認證',
 				desc: '設定校園網認證與自動重連。',
 				basic: '基礎設定',
+				account: '帳號密碼',
+				settings: '設定',
+				tabOnline: '上網認證',
+				tabDiag: '診斷',
+				tabSettings: '設定',
 				authorize: '網頁授權連結取得',
 				authorizeStep: '上網第一步',
 				getAuthorize: '取得網頁授權連結',
@@ -183,6 +193,11 @@ return view.extend({
 				title: 'Dr.COM Auth',
 				desc: 'Configure campus network authentication and automatic reconnect.',
 				basic: 'Basic Settings',
+				account: 'Account',
+				settings: 'Settings',
+				tabOnline: 'Online Auth',
+				tabDiag: 'Diagnostics',
+				tabSettings: 'Settings',
 				authorize: 'Web Authorize URL',
 				authorizeStep: 'Step 1: get online',
 				getAuthorize: 'Get Web Authorize URL',
@@ -483,22 +498,17 @@ return view.extend({
 			'.drcom-body-field{width:100%;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;resize:vertical}',
 			'.drcom-body-row .cbi-button{flex:0 0 auto}',
 			'.drcom-diag-title{font-weight:600;margin-bottom:4px}',
-			'.drcom-diag-pre{background:#2b2b2b;color:#eee;padding:8px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;margin:0}'
+			'.drcom-diag-pre{background:#2b2b2b;color:#eee;padding:8px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;margin:0}',
+			'.drcom-tabs-nav{display:flex;gap:2px;border-bottom:2px solid #4a90d9;margin:4px 0 12px 0}',
+			'.drcom-tab-btn{background:#eee;border:1px solid #ccc;border-bottom:none;padding:8px 18px;cursor:pointer;font-size:14px;border-radius:6px 6px 0 0}',
+			'.drcom-tab-btn.active{background:#4a90d9;color:#fff;border-color:#4a90d9;font-weight:600}',
+			'.drcom-tab-btn:hover{background:#dbe9f7}',
+			'.drcom-tab-btn.active:hover{background:#4a90d9}'
 		].join('\n'));
 
 		s = m.section(form.TypedSection, 'drcom_auth', tr('basic'));
 		s.anonymous = true;
 		s.addremove = false;
-
-		o = s.option(form.DummyValue, '_language', tr('language'));
-		o.rawhtml = true;
-		o.cfgvalue = function() {
-			return '<select id="drcom-lang-select" class="cbi-input-select">' +
-				'<option value="zh"' + (lang === 'zh' ? ' selected="selected"' : '') + '>' + tr('langZh') + '</option>' +
-				'<option value="zh-tw"' + (lang === 'zh-tw' ? ' selected="selected"' : '') + '>' + tr('langZhTw') + '</option>' +
-				'<option value="en"' + (lang === 'en' ? ' selected="selected"' : '') + '>' + tr('langEn') + '</option>' +
-				'</select>';
-		};
 
 		o = s.option(form.Value, 'wan_port', tr('wanPort'));
 		o.placeholder = 'eth1';
@@ -545,7 +555,8 @@ return view.extend({
 			return '<span id="drcom-authorize-status" class="drcom-result">' + tr('authorizeIdle') + '</span>';
 		};
 
-		s = m.section(form.TypedSection, 'drcom_auth', tr('cas'));
+		// Account card (own card on the Online Auth tab).
+		s = m.section(form.TypedSection, 'drcom_auth', tr('account'));
 		s.anonymous = true;
 		s.addremove = false;
 
@@ -556,6 +567,10 @@ return view.extend({
 		o = s.option(form.Value, 'password', tr('password'));
 		o.password = true;
 		o.rmempty = false;
+
+		s = m.section(form.TypedSection, 'drcom_auth', tr('cas'));
+		s.anonymous = true;
+		s.addremove = false;
 
 		o = s.option(form.Value, 'hscas_url', tr('casUrl'));
 		o.placeholder = 'https://hscas.hstc.edu.cn';
@@ -760,6 +775,21 @@ return view.extend({
 		o.placeholder = 'baidu.com';
 		o.rmempty = false;
 
+		// Settings tab: language + server addresses.
+		s = m.section(form.TypedSection, 'drcom_auth', tr('settings'));
+		s.anonymous = true;
+		s.addremove = false;
+
+		o = s.option(form.DummyValue, '_language', tr('language'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<select id="drcom-lang-select" class="cbi-input-select">' +
+				'<option value="zh"' + (lang === 'zh' ? ' selected="selected"' : '') + '>' + tr('langZh') + '</option>' +
+				'<option value="zh-tw"' + (lang === 'zh-tw' ? ' selected="selected"' : '') + '>' + tr('langZhTw') + '</option>' +
+				'<option value="en"' + (lang === 'en' ? ' selected="selected"' : '') + '>' + tr('langEn') + '</option>' +
+				'</select>';
+		};
+
 		s = m.section(form.TypedSection, 'drcom_auth', tr('server'));
 		s.anonymous = true;
 		s.addremove = false;
@@ -774,6 +804,52 @@ return view.extend({
 
 		return m.render().then(function(map) {
 			var viewNode = E('div', { 'class': 'drcom-auth-view' }, [ compactStyle, map ]);
+
+			// Group the rendered sections into tabs. Sections are matched by
+			// their heading text, which is stable per language via the dict.
+			var tabs = [
+				{ id: 'online', label: tr('tabOnline'), titles: [ tr('basic'), tr('account'), tr('network') ] },
+				{ id: 'diag', label: tr('tabDiag'), titles: [ tr('authorize'), tr('cas'), tr('auth') ] },
+				{ id: 'settings', label: tr('tabSettings'), titles: [ tr('settings'), tr('server') ] }
+			];
+
+			var sections = Array.prototype.slice.call(map.querySelectorAll('.cbi-section'));
+			var nav = E('div', { 'class': 'drcom-tabs-nav' });
+			var panes = [];
+
+			tabs.forEach(function(tab, idx) {
+				var pane = E('div', { 'class': 'drcom-tab-pane', 'data-tab': tab.id });
+				if (idx > 0)
+					pane.style.display = 'none';
+
+				sections.forEach(function(sec) {
+					var h = sec.querySelector('h3');
+					var title = h ? h.textContent.trim() : '';
+					if (tab.titles.indexOf(title) >= 0)
+						pane.appendChild(sec);
+				});
+
+				panes.push(pane);
+
+				var btn = E('button', {
+					'type': 'button',
+					'class': 'drcom-tab-btn' + (idx === 0 ? ' active' : ''),
+					'data-tab': tab.id,
+					'click': function() {
+						nav.querySelectorAll('.drcom-tab-btn').forEach(function(b) {
+							b.classList.toggle('active', b === btn);
+						});
+						panes.forEach(function(p) {
+							p.style.display = (p === pane) ? '' : 'none';
+						});
+					}
+				}, [ tab.label ]);
+				nav.appendChild(btn);
+			});
+
+			var tabsRoot = E('div', { 'class': 'drcom-tabs' }, [ nav ].concat(panes));
+			map.appendChild(tabsRoot);
+
 			var select = viewNode.querySelector('#drcom-lang-select');
 			if (select) {
 				select.addEventListener('change', function() {
