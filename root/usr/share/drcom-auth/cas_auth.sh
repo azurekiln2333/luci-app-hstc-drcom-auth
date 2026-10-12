@@ -39,11 +39,19 @@ else
 fi
 
 # --- paths (standalone CAS; independent of Dr.COM flows) --------------------
-CAS_COOKIE_FILE="$COOKIE_DIR/cas_cookie.txt"
-CAS_PARAMS_FILE="$COOKIE_DIR/cas_params.env"
-CAS_LOGIN_PAGE="$RESPONSE_DIR/cas_login_page.html"
-CAS_POST_BODY="$RESPONSE_DIR/cas_post_response.html"
-CAS_HEADERS="$COOKIE_DIR/cas_headers.txt"
+# Derive from SCRIPT_DIR so the script keeps working even if config.sh is from
+# an older package version and does not define the CAS_* variables yet.
+COOKIE_DIR="${COOKIE_DIR:-${SCRIPT_DIR:-/usr/share/drcom-auth}/info}"
+RESPONSE_DIR="${RESPONSE_DIR:-${SCRIPT_DIR:-/usr/share/drcom-auth}/responses}"
+CAS_COOKIE_FILE="${CAS_COOKIE_FILE:-$COOKIE_DIR/cas_cookie.txt}"
+CAS_PARAMS_FILE="${CAS_PARAMS_FILE:-$COOKIE_DIR/cas_params.env}"
+CAS_PUBLIC_KEY_FILE="${CAS_PUBLIC_KEY_FILE:-$COOKIE_DIR/public_key.pem}"
+DEFAULT_PUBLIC_KEY_FILE="${DEFAULT_PUBLIC_KEY_FILE:-${SCRIPT_DIR:-/usr/share/drcom-auth}/public_key.pem}"
+CAS_LOGIN_PAGE="${CAS_LOGIN_PAGE:-$RESPONSE_DIR/cas_login_page.html}"
+CAS_POST_BODY="${CAS_POST_BODY:-$RESPONSE_DIR/cas_post_response.html}"
+CAS_HEADERS="${CAS_HEADERS:-$COOKIE_DIR/cas_headers.txt}"
+STATUS_LOG_FILE="${STATUS_LOG_FILE:-${SCRIPT_DIR:-/usr/share/drcom-auth}/logs/drcom_status_log.txt}"
+USER_AGENT="${USER_AGENT:-Mozilla/5.0}"
 
 HSCAS_URL="${HSCAS_URL:-https://hscas.hstc.edu.cn}"
 
@@ -233,25 +241,48 @@ rsa_encrypt_password() {
 
 # Percent-encode a value for application/x-www-form-urlencoded bodies, matching
 # curl --data-urlencode semantics (space -> +, unreserved bytes kept as-is).
-# Byte-oriented so UTF-8 input is encoded per byte. Avoids gawk-only helpers
-# (strtonum) so it also runs under BusyBox awk on OpenWrt.
+#
+# Implemented with POSIX parameter expansion only: no od, awk, sed or locale
+# dependency. This matters on stripped-down OpenWrt images where od/awk may be
+# missing, which previously made this function return an empty string and sent
+# an empty `execution` field to CAS (HTTP 500 BadlyFormattedFlowExecutionKey).
+#
+# Input is treated byte-wise: each character is mapped to its byte value with
+# printf '%d' "'$c" which BusyBox ash supports. Bytes >= 0x80 are handled as
+# UTF-8 lead/continuation bytes naturally because each char in a multibyte
+# sequence is iterated separately by ${var#?} in a C locale.
 cas_urlencode() {
-	printf '%s' "$1" | od -An -v -tx1 | awk -v HEX="0123456789ABCDEF" '
-		{
-			for (i = 1; i <= NF; i++) {
-				h = toupper($i)
-				# Unreserved: 0-9 A-Z a-z - . _ ~  (space becomes +)
-				if (h == "20")
-					printf "+"
-				else if (h ~ /^3[0-9]$/ || h ~ /^4[1-9A-F]$/ || h ~ /^5[0-9A]$/ ||
-				         h ~ /^6[1-9A-F]$/ || h ~ /^7[0-9A]$/ ||
-				         h == "2D" || h == "2E" || h == "5F" || h == "7E")
-					printf "%c", index(HEX, substr(h,1,1)) * 16 + index(HEX, substr(h,2,1)) - 17
-				else
-					printf "%%%s", h
-			}
-		}
-	'
+	_cas_urlencode_str "$1"
+}
+
+# Internal worker; broken out so the loop variable stays local.
+_cas_urlencode_str() {
+	_cue_in="$1"
+	_cue_out=""
+	while [ -n "$_cue_in" ]; do
+		_cue_c=${_cue_in%"${_cue_in#?}"}      # first character
+		_cue_in=${_cue_in#?}                    # rest
+		case "$_cue_c" in
+			[A-Za-z0-9.\-_~])
+				_cue_out="$_cue_out$_cue_c"
+				;;
+			" ")
+				_cue_out="$_cue_out+"
+				;;
+			*)
+				# Byte value of the character. printf %d "'<char>" yields the
+				# value of the first byte, which is exactly what we need for
+				# percent-encoding UTF-8 byte by byte.
+				_cue_n=$(printf '%d' "'$_cue_c" 2>/dev/null)
+				case "$_cue_n" in
+					''|*[!0-9]*) _cue_n=63 ;;   # fall back to '?' on failure
+				esac
+				[ "$_cue_n" -gt 255 ] 2>/dev/null && _cue_n=$((_cue_n % 256))
+				_cue_out="$_cue_out$(printf '%%%02X' "$_cue_n")"
+				;;
+		esac
+	done
+	printf '%s' "$_cue_out"
 }
 
 # Build the exact POST body that perform_cas_login() sends. Stored in
@@ -272,6 +303,21 @@ cas_build_body() {
 	return 0
 }
 
+# Emit the request headers that will be sent on the POST, one per line as
+# `name: value`, so they can be shown/copied.
+cas_request_headers() {
+	printf 'User-Agent: %s\n' "$USER_AGENT"
+	printf 'Content-Type: application/x-www-form-urlencoded\n'
+	printf 'Accept: */*\n'
+	printf 'Cookie: %s\n' "$(cas_cookie_header_value)"
+}
+
+# Collapse the cookie jar into a single Cookie header value (or empty).
+cas_cookie_header_value() {
+	[ -s "$CAS_COOKIE_FILE" ] || return 0
+	awk '!/^#/ && NF >= 7 { printf "%s%s=%s", (n++ ? "; " : ""), $6, $7 }' "$CAS_COOKIE_FILE"
+}
+
 # Report the assembled request in a copy-pasteable, machine-readable form.
 cmd_body_inner() {
 	cas_build_body || return 1
@@ -284,6 +330,7 @@ cmd_body_inner() {
 	printf 'encrypted_password=%s\n' "$CAS_ENCRYPTED_PASSWORD"
 	printf 'password_prefix=%s\n' "$(printf '%s' "$CAS_ENCRYPTED_PASSWORD" | cut -c1-7)"
 	printf 'password_length=%s\n' "${#CAS_ENCRYPTED_PASSWORD}"
+	printf 'headers=%s\n' "$(cas_request_headers | tr '\n' '|' | sed 's/|$//')"
 	printf 'body=%s\n' "$CAS_POST_BODY_STRING"
 }
 
@@ -321,6 +368,9 @@ perform_cas_login() {
 	printf 'diagnosis=login rejected by CAS\n'
 	printf 'http_code=%s\n' "$http_code"
 	printf 'login_url=%s\n' "$HSCAS_LOGIN_URL"
+	printf 'headers=%s\n' "$(cas_request_headers | tr '\n' '|' | sed 's/|$//')"
+	printf 'execution_length=%s\n' "${#CAS_EXECUTION}"
+	printf 'body=%s\n' "$CAS_POST_BODY_STRING"
 	printf 'page_saved=%s\n' "$CAS_POST_BODY"
 	printf 'page_head=%s\n' "$(head -c 400 "$CAS_POST_BODY" 2>/dev/null | tr '\n' ' ')"
 	return 3

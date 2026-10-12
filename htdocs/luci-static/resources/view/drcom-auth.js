@@ -84,6 +84,7 @@ return view.extend({
 				casPasswordLength: '密码长度',
 				casFieldOrder: '字段顺序',
 				casUrlencoded: 'URL 编码',
+				casHeaders: '请求头',
 				casRequestBody: '完整请求体',
 				casCopy: '复制',
 				casCopied: '已复制到剪贴板',
@@ -165,6 +166,7 @@ return view.extend({
 				casPasswordLength: '密碼長度',
 				casFieldOrder: '欄位順序',
 				casUrlencoded: 'URL 編碼',
+				casHeaders: '請求標頭',
 				casRequestBody: '完整請求體',
 				casCopy: '複製',
 				casCopied: '已複製到剪貼簿',
@@ -246,6 +248,7 @@ return view.extend({
 				casPasswordLength: 'Password Length',
 				casFieldOrder: 'Field Order',
 				casUrlencoded: 'URL Encoded',
+				casHeaders: 'Request Headers',
 				casRequestBody: 'Full Request Body',
 				casCopy: 'Copy',
 				casCopied: 'Copied to clipboard',
@@ -375,6 +378,7 @@ return view.extend({
 			box.appendChild(casFieldRow(tr('casPasswordLength'), values.password_length || ''));
 			box.appendChild(casFieldRow(tr('casFieldOrder'), values.field_order || ''));
 			box.appendChild(casFieldRow(tr('casUrlencoded'), values.urlencoded || ''));
+			box.appendChild(casFieldRow(tr('casHeaders'), (values.headers || '').replace(/\|/g, '\n')));
 			box.appendChild(casFieldRow(tr('casRequestBody'), values.body || ''));
 			box.style.display = '';
 		};
