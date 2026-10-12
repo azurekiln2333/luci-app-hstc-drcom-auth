@@ -15,6 +15,7 @@ Makefile    text eol=lf
 .gitignore     text eol=lf
 root/etc/config/* text eol=lf
 root/etc/init.d/* text eol=lf
+packaging/* text eol=lf
 
 *.ipk       binary
 *.png       binary

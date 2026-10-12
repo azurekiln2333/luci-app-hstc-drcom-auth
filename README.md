@@ -177,6 +177,32 @@ node ./scripts/test_standalone_cas.mjs <username> <password>
 `openssl pkeyutl/rsautl` 的测试垫片，仅用于本地测试；路由器上使用真实的
 `openssl`（OpenWrt 包名通常为 `openssl-util`）。
 
+## 升级时的 conffile 提示
+
+升级 ipk 时可能出现：
+
+```text
+Collected errors:
+ * resolve_conffiles: Existing conffile /etc/config/drcom_auth is different
+   from the conffile in the new package. The new conffile will be placed at
+   /etc/config/drcom_auth-opkg.
+```
+
+这是 opkg 的 **conffile 保护机制**，不是安装失败：
+
+- 你设备上现有的 `/etc/config/drcom_auth`（含账号/密码等）被**保留**
+- 包里的默认配置被放到 `/etc/config/drcom_auth-opkg`
+
+可选处理：
+
+```sh
+rm -f /etc/config/drcom_auth-opkg          # 不需要那个默认副本时直接删
+uci show drcom_auth                         # 确认配置完整
+```
+
+postinst 会在升级后自动补齐**缺失**的新选项（如 `hscas_url`），
+不会覆盖你已填的值。
+
 ## 依赖
 
 - 运行时：`curl`、`openssl-util`（RSA 密码加密）
