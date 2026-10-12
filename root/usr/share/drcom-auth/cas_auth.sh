@@ -53,6 +53,13 @@ CAS_HEADERS="${CAS_HEADERS:-$COOKIE_DIR/cas_headers.txt}"
 STATUS_LOG_FILE="${STATUS_LOG_FILE:-${SCRIPT_DIR:-/usr/share/drcom-auth}/logs/drcom_status_log.txt}"
 USER_AGENT="${USER_AGENT:-Mozilla/5.0}"
 
+# Hard timeouts so a stuck network never hangs the panel indefinitely.
+# Overridable from config.sh for slow links.
+CAS_CONNECT_TIMEOUT="${CAS_CONNECT_TIMEOUT:-10}"
+CAS_MAX_TIME="${CAS_MAX_TIME:-30}"
+# Reuse freshly captured params for this many seconds before refetching.
+CAS_PARAMS_MAX_AGE="${CAS_PARAMS_MAX_AGE:-120}"
+
 HSCAS_URL="${HSCAS_URL:-https://hscas.hstc.edu.cn}"
 
 # Normalize HSCAS_URL so both spellings work and the user never ends up with a
@@ -116,7 +123,8 @@ fetch_cas_params() {
 
 	# Capture curl's exit status and stderr separately so failures are visible.
 	curl_rc=0
-	http_code=$(curl -L -c "$CAS_COOKIE_FILE" -b "$CAS_COOKIE_FILE" \
+	http_code=$(curl --connect-timeout "$CAS_CONNECT_TIMEOUT" --max-time "$CAS_MAX_TIME" \
+		-L -c "$CAS_COOKIE_FILE" -b "$CAS_COOKIE_FILE" \
 		-H "User-Agent: $USER_AGENT" -s -S -o "$CAS_LOGIN_PAGE" \
 		-w "%{http_code}" "$HSCAS_LOGIN_URL" 2>"$COOKIE_DIR/cas_curl_error.txt") || curl_rc=$?
 
@@ -163,7 +171,9 @@ fetch_cas_params() {
 	CAS_EVENT_ID=${CAS_EVENT_ID:-submit}
 
 	CAS_PARAMS_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+	CAS_CAPTURED_EPOCH=$(date '+%s' 2>/dev/null || echo 0)
 	cas_log "params captured: form=$CAS_LOGIN_FORM_ID currentMenu=$CAS_CURRENT_MENU failN=$CAS_FAIL_N _eventId=$CAS_EVENT_ID execution=${#CAS_EXECUTION} chars"
+	# Persist immediately so a later login can reuse exactly what was fetched.
 	persist_cas_params
 	return 0
 }
@@ -184,6 +194,7 @@ CAS_FAIL_N=$CAS_FAIL_N
 CAS_MFA_STATE=$CAS_MFA_STATE
 CAS_EVENT_ID=$CAS_EVENT_ID
 CAS_GEOLOCATION=$CAS_GEOLOCATION
+CAS_CAPTURED_EPOCH=$CAS_CAPTURED_EPOCH
 EOF
 	chmod 600 "$CAS_PARAMS_FILE"
 }
@@ -193,6 +204,15 @@ load_persisted_params() {
 	. "$CAS_PARAMS_FILE"
 	[ -n "$CAS_EXECUTION" ] || return 1
 	return 0
+}
+
+# Seconds since the persisted params were captured, or a large number if
+# unknown. Used to decide whether they are still worth reusing.
+params_age() {
+	local now
+	[ -n "$CAS_CAPTURED_EPOCH" ] || { printf '999999\n'; return 0; }
+	now=$(date '+%s' 2>/dev/null || echo 0)
+	printf '%s\n' "$((now - CAS_CAPTURED_EPOCH))"
 }
 
 # --- step 3+4: RSA-encrypt the password and POST ----------------------------
@@ -211,7 +231,8 @@ rsa_encrypt_password() {
 
 	if [ ! -s "$CAS_PUBLIC_KEY_FILE" ]; then
 		cas_log "fetching RSA public key from $HSCAS_PUBLIC_KEY_URL"
-		if ! curl -L -b "$CAS_COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s \
+		if ! curl --connect-timeout "$CAS_CONNECT_TIMEOUT" --max-time "$CAS_MAX_TIME" \
+			-L -b "$CAS_COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s \
 			-o "$CAS_PUBLIC_KEY_FILE" "$HSCAS_PUBLIC_KEY_URL"; then
 			cas_log "failed: public key request failed"
 			return 1
@@ -334,20 +355,46 @@ cmd_body_inner() {
 	printf 'body=%s\n' "$CAS_POST_BODY_STRING"
 }
 
+# Print the fully assembled request exactly as it goes on the wire:
+#   request line, headers, blank line, then the url-encoded body.
+# Everything here is literal text (no truncation) so it can be copied as-is.
+cmd_request_inner() {
+	cas_build_body || return 1
+
+	printf 'POST %s HTTP/1.1\n' "${HSCAS_LOGIN_URL#*://}"
+	printf 'Host: %s\n' "$(printf '%s' "$HSCAS_BASE_URL" | sed -e 's#^[a-z]*://##' -e 's#/.*$##')"
+	cas_request_headers
+	printf 'Content-Length: %s\n' "${#CAS_POST_BODY_STRING}"
+	printf '\n'
+	printf '%s\n' "$CAS_POST_BODY_STRING"
+}
+
 perform_cas_login() {
-	local http_code success_marker
+	local http_code success_marker curl_rc
 
 	# Build the body once so the value shown by `cas_auth.sh body` is exactly
 	# what gets submitted.
 	cas_build_body || return 1
 
 	cas_log "POST $HSCAS_LOGIN_URL (no service parameter)"
-	http_code=$(curl -c "$CAS_COOKIE_FILE" -b "$CAS_COOKIE_FILE" \
-		-H "User-Agent: $USER_AGENT" -X POST -s -D "$CAS_HEADERS" -o "$CAS_POST_BODY" \
+	curl_rc=0
+	http_code=$(curl --connect-timeout "$CAS_CONNECT_TIMEOUT" --max-time "$CAS_MAX_TIME" \
+		-c "$CAS_COOKIE_FILE" -b "$CAS_COOKIE_FILE" \
+		-H "User-Agent: $USER_AGENT" -X POST -s -S -D "$CAS_HEADERS" -o "$CAS_POST_BODY" \
 		-H "Content-Type: application/x-www-form-urlencoded" \
 		--data-raw "$CAS_POST_BODY_STRING" \
 		-w "%{http_code}" \
-		"$HSCAS_LOGIN_URL")
+		"$HSCAS_LOGIN_URL" 2>"$COOKIE_DIR/cas_curl_error.txt") || curl_rc=$?
+
+	if [ "$curl_rc" -ne 0 ]; then
+		cas_log "CAS login failed: curl exit $curl_rc; $(cat "$COOKIE_DIR/cas_curl_error.txt" 2>/dev/null)"
+		persist_cas_state "$(date '+%Y-%m-%d %H:%M:%S')" "curl-error" "$curl_rc"
+		printf 'diagnosis=curl failed on POST (exit %s)\n' "$curl_rc"
+		printf 'curl_error=%s\n' "$(cat "$COOKIE_DIR/cas_curl_error.txt" 2>/dev/null)"
+		printf 'login_url=%s\n' "$HSCAS_LOGIN_URL"
+		printf 'timeouts=%s/%s\n' "$CAS_CONNECT_TIMEOUT" "$CAS_MAX_TIME"
+		return 1
+	fi
 
 	success_marker=false
 	if grep -q "successRedirectUrl" "$CAS_POST_BODY" 2>/dev/null \
@@ -436,18 +483,39 @@ cmd_params() {
 }
 
 cmd_login() {
+	local age
+	# Reuse the params captured by `params` when they are still fresh, so the
+	# panel flow (fetch -> login) uses exactly the values that were displayed
+	# and persisted. Refetch only when none exist or they look stale.
 	if [ -z "$CAS_EXECUTION" ]; then
-		fetch_cas_params || return 1
+		if load_persisted_params; then
+			age=$(params_age)
+			if [ "${age:-999999}" -le "$CAS_PARAMS_MAX_AGE" ] 2>/dev/null; then
+				cas_log "reusing persisted params (age ${age}s)"
+			else
+				cas_log "persisted params are ${age}s old; refetching"
+				fetch_cas_params || return 1
+			fi
+		else
+			fetch_cas_params || return 1
+		fi
 	fi
 	perform_cas_login
 }
 
 # Load persisted params if needed, then assemble and print the request body.
+# Usage: cmd_body [request]
+#   default   key=value dump (machine readable)
+#   request   full HTTP request preview (request line + headers + body)
 cmd_body() {
 	if [ -z "$CAS_EXECUTION" ]; then
+		# Prefer the params captured earlier; only refetch when none are saved.
 		load_persisted_params || fetch_cas_params || return 1
 	fi
-	cmd_body_inner
+	case "${1:-}" in
+		request) cmd_request_inner ;;
+		*) cmd_body_inner ;;
+	esac
 }
 
 cmd_status() {
@@ -495,12 +563,13 @@ cmd_ensure() {
 CMD="${1:-status}"
 case "$CMD" in
 	params) cmd_params ;;
-	body) cmd_body ;;
+	body) cmd_body "${2:-}" ;;
+	request) cmd_body request ;;
 	login) cmd_login ;;
 	status) cmd_status ;;
 	ensure) cmd_ensure ;;
 	*)
-		echo "usage: $0 {params|body|login|status|ensure}" >&2
+		echo "usage: $0 {params|body|request|login|status|ensure}" >&2
 		exit 2
 		;;
 esac
