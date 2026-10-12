@@ -33,5 +33,10 @@ package-lock.json
 /.pi/
 /.trae/
 /.zcode/
-/.trellis/
-/AGENTS.md
+
+# Trellis: keep only local-only subpaths out of git (the rest is tracked)
+.trellis/.backup-*
+.trellis/worktrees/
+.trellis/.runtime/
+.trellis/.cache/
+.trellis/.developer
