@@ -728,48 +728,6 @@ return view.extend({
 			}).catch(function() {});
 		};
 
-		// Render the accounts manager: a row per account (username, id, active
-		// radio, delete) plus an add-account form. Reloads the page after a
-		// change so every dependent field (dropdown, rendered config) is fresh.
-		var renderAccountsEditor = function(host) {
-			if (!host)
-				return;
-			host.innerHTML = '';
-
-			var list = E('div', { 'class': 'drcom-acc-list' });
-			accounts.forEach(function(a) {
-				var activeRadio = E('input', {
-					'type': 'radio', 'name': 'drcom-active-account', 'value': a.id,
-					'checked': a.active ? 'checked' : null,
-					'change': function() { setActive(a.id); }
-				});
-				list.appendChild(E('div', { 'class': 'drcom-acc-row' }, [
-					activeRadio,
-					E('span', { 'class': 'drcom-acc-user' }, [ a.username || ('(' + a.id + ')') ]),
-					E('span', { 'class': 'drcom-acc-id' }, [ a.id ]),
-					E('button', {
-						'class': 'cbi-button cbi-button-negative', 'type': 'button',
-						'click': function() { removeAccount(a.id); }
-					}, [ tr('accountDelete') ])
-				]));
-			});
-			if (!accounts.length)
-				list.appendChild(E('div', { 'class': 'drcom-result' }, [ tr('noAccounts') ]));
-			host.appendChild(list);
-
-			var idInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': tr('accountIdHint') });
-			var userInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': '202400000000' });
-			var passInput = E('input', { 'type': 'password', 'class': 'cbi-input-text', 'placeholder': tr('password') });
-			host.appendChild(E('div', { 'class': 'drcom-acc-add' }, [
-				E('div', { 'class': 'drcom-body-label' }, [ tr('accountAdd') ]),
-				idInput, userInput, passInput,
-				E('button', {
-					'class': 'cbi-button cbi-button-action', 'type': 'button',
-					'click': function() { addAccount(idInput, userInput, passInput); }
-				}, [ tr('accountSave') ])
-			]));
-		};
-
 		var reloadSoon = function() { window.setTimeout(function() { window.location.reload(); }, 600); };
 
 		var setActive = function(id) {
@@ -1230,7 +1188,30 @@ return view.extend({
 		o = s.option(form.DummyValue, '_accounts_editor', '');
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return '<div id="drcom-accounts-editor"></div>';
+			// Build the manager inline so it does not depend on a later DOM lookup.
+			var rows = '';
+			if (!accounts.length) {
+				rows = '<div class="drcom-result">' + htmlEscape(tr('noAccounts')) + '</div>';
+			} else {
+				accounts.forEach(function(a) {
+					rows += '<div class="drcom-acc-row">' +
+						'<input type="radio" name="drcom-active-account" value="' + htmlEscape(a.id) + '"' +
+						(a.active ? ' checked="checked"' : '') + '/>' +
+						'<span class="drcom-acc-user">' + htmlEscape(a.username || ('(' + a.id + ')')) + '</span>' +
+						'<span class="drcom-acc-id">' + htmlEscape(a.id) + '</span>' +
+						'<button type="button" class="cbi-button cbi-button-negative" data-acc-del="' + htmlEscape(a.id) + '">' +
+						htmlEscape(tr('accountDelete')) + '</button>' +
+						'</div>';
+				});
+			}
+			return '<div id="drcom-accounts-editor">' + rows + '</div>' +
+				'<div class="drcom-acc-add">' +
+				'<div class="drcom-body-label">' + htmlEscape(tr('accountAdd')) + '</div>' +
+				'<input type="text" id="drcom-acc-new-id" class="cbi-input-text" placeholder="' + htmlEscape(tr('accountIdHint')) + '"/>' +
+				'<input type="text" id="drcom-acc-new-user" class="cbi-input-text" placeholder="202400000000"/>' +
+				'<input type="password" id="drcom-acc-new-pass" class="cbi-input-text" placeholder="' + htmlEscape(tr('password')) + '"/>' +
+				'<button type="button" class="cbi-button cbi-button-action" id="drcom-acc-save">' + htmlEscape(tr('accountSave')) + '</button>' +
+				'</div>';
 		};
 
 		// Settings tab: language + server addresses.
@@ -1331,7 +1312,28 @@ return view.extend({
 				});
 			}
 
-			renderAccountsEditor(document.getElementById('drcom-accounts-editor'));
+			// Wire the accounts manager (event delegation; the markup is emitted
+			// by the section's cfgvalue, so we bind here once it is in the DOM).
+			var accEditor = viewNode.querySelector('#drcom-accounts-editor');
+			if (accEditor) {
+				accEditor.addEventListener('change', function(ev) {
+					if (ev.target && ev.target.name === 'drcom-active-account')
+						setActive(ev.target.value);
+				});
+				accEditor.addEventListener('click', function(ev) {
+					var id = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-acc-del');
+					if (id)
+						removeAccount(id);
+				});
+			}
+			var saveBtn = viewNode.querySelector('#drcom-acc-save');
+			if (saveBtn) {
+				saveBtn.addEventListener('click', function() {
+					addAccount(viewNode.querySelector('#drcom-acc-new-id'),
+						viewNode.querySelector('#drcom-acc-new-user'),
+						viewNode.querySelector('#drcom-acc-new-pass'));
+				});
+			}
 
 			// Populate the status card, CAS rows, then the saved request once.
 			refreshDashboard();
