@@ -53,7 +53,13 @@ LOG_FILE="$LOG_DIR/drcom_log.txt"
 PING_LOG_FILE="$LOG_DIR/drcom_ping_log.txt"
 STATUS_LOG_FILE="$LOG_DIR/drcom_status_log.txt"
 
-COOKIE_DIR="$SCRIPT_DIR/info"
+# Active account. CAS state (cookies, params, login result) is per account so
+# switching accounts never reuses another account's session.
+ACCOUNT_ID="__ACCOUNT_ID__"
+ACCOUNTS="__ACCOUNT_IDS__"
+
+# Dr.COM-chain state is shared, but the CAS state below it is per account.
+COOKIE_DIR="$SCRIPT_DIR/info/accounts/$ACCOUNT_ID"
 COOKIE_FILE="$COOKIE_DIR/cookie.txt"
 HEADERS_FILE="$COOKIE_DIR/headers.txt"
 # Dr.COM-chain public key (used by hscas_login.sh).

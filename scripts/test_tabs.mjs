@@ -14,7 +14,7 @@ console.log();
 function dict(lang) {
   // crude: pull the block for the language and read basic/account/network/authorize/cas/auth/settings/server
   const keys = ['basic', 'account', 'network', 'authorize', 'cas', 'auth', 'settings', 'server',
-    'tabOnline', 'tabDiag', 'tabSettings'];
+    'status', 'accountsTab', 'tabOnline', 'tabAccounts', 'tabDiag', 'tabSettings'];
   const out = {};
   // find the lang object start
   let start;
@@ -30,7 +30,8 @@ function dict(lang) {
 }
 
 const tabs = {
-  online: ['basic', 'account', 'network'],
+  online: ['status', 'account', 'basic', 'network'],
+  accounts: ['accountsTab'],
   diag: ['authorize', 'cas', 'auth'],
   settings: ['settings', 'server']
 };

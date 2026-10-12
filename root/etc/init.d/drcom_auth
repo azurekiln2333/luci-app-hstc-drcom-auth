@@ -8,7 +8,7 @@
 START=95
 STOP=10
 USE_PROCD=1
-EXTRA_COMMANDS="authorize ticket login cas_params cas_body cas_login cas_status cas_ensure cas_logout public_key public_key_status"
+EXTRA_COMMANDS="authorize ticket login overview cas_params cas_body cas_login cas_status cas_ensure cas_logout public_key public_key_status accounts_list account_set_active account_upsert account_delete"
 EXTRA_HELP="	authorize		Get the Dr.COM authorize URL only
 	ticket			Run the full Dr.COM login flow now
 	login			Alias of ticket
@@ -34,16 +34,58 @@ sed_escape() {
 	printf "%s" "$1" | sed -e 's/[\\&|]/\\&/g'
 }
 
+# Resolve the active account. Accounts live as `config account '<name>'`
+# sections; `main.active_account` names the one to use. Legacy single
+# `main.username`/`main.password` are migrated on the fly so upgrades keep
+# working. Echoes: "<account>\t<username>\t<password>\t<space-separated-ids>"
+resolve_account() {
+	local active username password ids
+
+	config_load drcom_auth
+	config_get active main active_account ""
+
+	# Enumerate account sections.
+	ids=""
+	config_foreach _collect_account account
+
+	# Migrate a legacy single account into an account section once.
+	if [ -z "$ids" ]; then
+		config_get username main username ""
+		config_get password main password ""
+		if [ -n "$username" ]; then
+			uci -q set drcom_auth.acc1=account
+			uci -q set drcom_auth.acc1.username="$username"
+			uci -q set drcom_auth.acc1.password="$password"
+			uci -q delete drcom_auth.main.username
+			uci -q delete drcom_auth.main.password
+			uci -q set drcom_auth.main.active_account='acc1'
+			uci -q commit drcom_auth
+			active=acc1
+			ids=acc1
+		fi
+	fi
+
+	[ -n "$active" ] || active=$(printf '%s' "$ids" | awk '{print $1}')
+	[ -n "$active" ] || active=""
+
+	config_get username "$active" username ""
+	config_get password "$active" password ""
+
+	printf '%s\t%s\t%s\t%s\n' "$active" "$username" "$password" "$ids"
+}
+
+_collect_account() {
+	ids="${ids:+$ids }$1"
+}
+
 # Render the runtime config from UCI using the shipped template.
 write_config() {
-	local enabled wan_port username password drcom_server_ip hscas_url
-	local hscas_public_key_url mac_type user_agent ping_host
+	local enabled wan_port drcom_server_ip hscas_url account username password
+	local hscas_public_key_url mac_type user_agent ping_host account_ids
 
 	config_load drcom_auth
 	uci_get enabled enabled 0
 	uci_get wan_port wan_port eth1
-	uci_get username username ""
-	uci_get password password ""
 	uci_get drcom_server_ip drcom_server_ip 192.168.2.34
 	uci_get hscas_url hscas_url https://hscas.hstc.edu.cn
 	# Accept either the base host or a full /cas/login URL; derive the public
@@ -54,10 +96,23 @@ write_config() {
 	uci_get user_agent user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36"
 	uci_get ping_host ping_host baidu.com
 
-	mkdir -p "$APP_DIR/logs" "$APP_DIR/info" "$APP_DIR/responses"
+	# Active account credentials (single resolution).
+	account=$(resolve_account)
+	account_ids=$(printf '%s' "$account" | cut -f4)
+	username=$(printf '%s' "$account" | cut -f2)
+	password=$(printf '%s' "$account" | cut -f3)
+	account=$(printf '%s' "$account" | cut -f1)
+	[ -n "$account" ] || account="default"
+	# The account id is used as a path component; keep it safe.
+	account=$(printf '%s' "$account" | tr -cd 'A-Za-z0-9_.-')
+	[ -n "$account" ] || account="default"
+
+	mkdir -p "$APP_DIR/logs" "$APP_DIR/info/accounts/$account" "$APP_DIR/responses"
 
 	sed \
 		-e "s|__SCRIPT_DIR__|$(sed_escape "$APP_DIR")|g" \
+		-e "s|__ACCOUNT_ID__|$(sed_escape "$account")|g" \
+		-e "s|__ACCOUNT_IDS__|$(sed_escape "$account_ids")|g" \
 		-e "s|__USER_AGENT__|$(sed_escape "$user_agent")|g" \
 		-e "s|__WAN_PORT__|$(sed_escape "$wan_port")|g" \
 		-e "s|__DRCOM_SERVER_IP__|$(sed_escape "$drcom_server_ip")|g" \
@@ -144,6 +199,113 @@ cas_ensure() {
 cas_logout() {
 	write_config
 	/bin/sh "$APP_DIR/cas_auth.sh" logout
+}
+
+# --- account management -----------------------------------------------------# List accounts as one line each: <id><TAB><username><TAB><active|-> 
+accounts_list() {
+	local active ids id user
+
+	resolve_account >/dev/null 2>&1
+	active=$(uci -q get drcom_auth.main.active_account)
+	ids=$(resolve_account | cut -f4)
+
+	[ -n "$active" ] || active=$(printf '%s' "$ids" | awk '{print $1}')
+
+	for id in $ids; do
+		user=$(uci -q get "drcom_auth.$id.username")
+		if [ "$id" = "$active" ]; then
+			printf '%s\t%s\tactive\n' "$id" "$user"
+		else
+			printf '%s\t%s\t-\n' "$id" "$user"
+		fi
+	done
+}
+
+# Select the active account (and render its config).
+account_set_active() {
+	local id="$1"
+	[ -n "$id" ] || { echo "account_set_active: missing id" >&2; return 1; }
+	uci -q get "drcom_auth.$id" >/dev/null 2>&1 || {
+		echo "account_set_active: no such account: $id" >&2
+		return 1
+	}
+	uci -q set "drcom_auth.main.active_account=$id"
+	uci -q commit drcom_auth
+	write_config
+	printf 'active=%s\n' "$id"
+}
+
+# Create or update an account: account_upsert <id> <username> [password]
+account_upsert() {
+	local id="$1" user="$2" pass="$3"
+	[ -n "$id" ] && [ -n "$user" ] || {
+		echo "account_upsert: usage: <id> <username> [password]" >&2
+		return 1
+	}
+	[ -z "$(uci -q get drcom_auth.$id)" ] && uci -q set "drcom_auth.$id=account"
+	uci -q set "drcom_auth.$id.username=$user"
+	[ -n "$pass" ] && uci -q set "drcom_auth.$id.password=$pass"
+
+	# First account becomes active automatically.
+	if [ -z "$(uci -q get drcom_auth.main.active_account)" ]; then
+		uci -q set "drcom_auth.main.active_account=$id"
+	fi
+	uci -q commit drcom_auth
+
+	# Drop that account's cached session so a changed password starts clean.
+	rm -rf "$APP_DIR/info/accounts/$id" 2>/dev/null || true
+
+	write_config
+	printf 'saved=%s\n' "$id"
+}
+
+# Delete an account and its cached state.
+account_delete() {
+	local id="$1" active first
+	[ -n "$id" ] || { echo "account_delete: missing id" >&2; return 1; }
+
+	uci -q delete "drcom_auth.$id"
+	active=$(uci -q get drcom_auth.main.active_account)
+	if [ "$active" = "$id" ]; then
+		first=$(resolve_account | cut -f4 | awk '{print $1}')
+		if [ -n "$first" ]; then
+			uci -q set "drcom_auth.main.active_account=$first"
+		else
+			uci -q delete drcom_auth.main.active_account
+		fi
+	fi
+	uci -q commit drcom_auth
+	rm -rf "$APP_DIR/info/accounts/$id" 2>/dev/null || true
+
+	write_config
+	printf 'deleted=%s\n' "$id"
+}
+
+# Overall status for the panel's status card: network reachability and the
+# Dr.COM-side auth result. CAS/cookie state comes from cas_status.
+# Named overview because `status` is reserved by rc.common.
+overview() {
+	local ping_host net drcom
+
+	write_config
+	. "$CONFIG_FILE"
+
+	ping_host="${PING_HOST:-baidu.com}"
+	if ping -c 1 -W 2 "$ping_host" >/dev/null 2>&1; then
+		net=up
+	else
+		net=down
+	fi
+
+	# Last Dr.COM/CAS auth result for the active account.
+	drcom=none
+	if [ -f "$COOKIE_DIR/cas_state.env" ]; then
+		. "$COOKIE_DIR/cas_state.env"
+		[ -n "$CAS_LOGIN_RESULT" ] && drcom="$CAS_LOGIN_RESULT"
+	fi
+
+	printf 'network=%s\n' "$net"
+	printf 'drcom=%s\n' "$drcom"
 }
 
 public_key() {

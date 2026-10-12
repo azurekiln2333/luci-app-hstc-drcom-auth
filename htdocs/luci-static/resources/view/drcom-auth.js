@@ -74,7 +74,8 @@ return view.extend({
 					e && e.message
 				].filter(function(v) { return v; }).join('\n').trim();
 			}),
-			collectInterfaces()
+			collectInterfaces(),
+			fs.exec_direct('/etc/init.d/drcom_auth', [ 'accounts_list' ]).catch(function() { return ''; })
 		]);
 	},
 
@@ -86,6 +87,17 @@ return view.extend({
 		var ifaceDevices = ifaceInfo.devices || [];
 		var ifaceLogical = ifaceInfo.logical || {};
 		var savedWanPort = ifaceInfo.current || '';
+
+		// Parse `accounts_list`: one "<id>\t<username>\t<active|->" per line.
+		var accounts = (data[3] || '').trim().split('\n').filter(function(l) { return l.indexOf('\t') > 0; })
+			.map(function(l) {
+				var p = l.split('\t');
+				return { id: p[0], username: p[1] || '', active: p[2] === 'active' };
+			});
+		var activeAccount = null;
+		accounts.forEach(function(a) { if (a.active) activeAccount = a; });
+		if (!activeAccount && accounts.length)
+			activeAccount = accounts[0];
 		var dict = {
 			zh: {
 				title: 'Dr.COM 认证',
@@ -100,6 +112,36 @@ return view.extend({
 				authorizeStep: '上网第一步',
 				casStep: '上网第二步',
 				authStep: '上网第三步',
+				status: '状态',
+				statusNetwork: '联网状态',
+				statusDrcom: 'Dr.COM 认证状态',
+				statusCas: 'CAS 认证状态',
+				statusUnknown: '未知',
+				statusNetworkUp: '已联网',
+				statusNetworkDown: '未联网',
+				statusDrcomOk: '已认证',
+				statusDrcomFail: '认证失败',
+				statusCasOk: '已登录',
+				statusCasNo: '未登录',
+				statusCookiePresent: '存在（%s）',
+				statusCookieNone: '不存在',
+				tabAccounts: '账号管理',
+				accountsTab: '账号管理',
+				activeAccount: '当前账号',
+				noAccounts: '尚无账号，请在下方添加。',
+				accountHint: '新增或管理账号请到「账号管理」标签页。',
+				accountAdd: '新增账号',
+				accountSave: '保存',
+				accountSaved: '账号已保存。',
+				accountSaveFailed: '账号保存失败',
+				accountDelete: '删除',
+				accountDeleted: '账号已删除。',
+				accountDeleteConfirm: '确定删除账号 %s 吗？',
+				accountSwitched: '已切换当前账号。',
+				accountSwitchFailed: '切换账号失败',
+				accountIdHint: '账号标识（留空自动生成）',
+				accountNeedUsername: '请填写用户名。',
+				accountBadId: '账号标识无效。',
 				connectNow: '一键登录并认证',
 				connectNowDesc: '确保已登录并执行联网检测；已登录时会自动跳过。',
 				connectRunning: '认证中...',
@@ -194,6 +236,36 @@ return view.extend({
 				authorizeStep: '上網第一步',
 				casStep: '上網第二步',
 				authStep: '上網第三步',
+				status: '狀態',
+				statusNetwork: '連網狀態',
+				statusDrcom: 'Dr.COM 認證狀態',
+				statusCas: 'CAS 認證狀態',
+				statusUnknown: '未知',
+				statusNetworkUp: '已連網',
+				statusNetworkDown: '未連網',
+				statusDrcomOk: '已認證',
+				statusDrcomFail: '認證失敗',
+				statusCasOk: '已登入',
+				statusCasNo: '未登入',
+				statusCookiePresent: '存在（%s）',
+				statusCookieNone: '不存在',
+				tabAccounts: '帳號管理',
+				accountsTab: '帳號管理',
+				activeAccount: '目前帳號',
+				noAccounts: '尚無帳號，請在下方新增。',
+				accountHint: '新增或管理帳號請到「帳號管理」頁籤。',
+				accountAdd: '新增帳號',
+				accountSave: '儲存',
+				accountSaved: '帳號已儲存。',
+				accountSaveFailed: '帳號儲存失敗',
+				accountDelete: '刪除',
+				accountDeleted: '帳號已刪除。',
+				accountDeleteConfirm: '確定刪除帳號 %s 嗎？',
+				accountSwitched: '已切換目前帳號。',
+				accountSwitchFailed: '切換帳號失敗',
+				accountIdHint: '帳號識別（留空自動產生）',
+				accountNeedUsername: '請填寫使用者名稱。',
+				accountBadId: '帳號識別無效。',
 				connectNow: '一鍵登入並認證',
 				connectNowDesc: '確保已登入並執行連網偵測；已登入時會自動略過。',
 				connectRunning: '認證中...',
@@ -288,6 +360,36 @@ return view.extend({
 				authorizeStep: 'Step 1: get online',
 				casStep: 'Step 2: CAS login',
 				authStep: 'Step 3: authenticate',
+				status: 'Status',
+				statusNetwork: 'Network',
+				statusDrcom: 'Dr.COM Auth',
+				statusCas: 'CAS Auth',
+				statusUnknown: 'Unknown',
+				statusNetworkUp: 'Online',
+				statusNetworkDown: 'Offline',
+				statusDrcomOk: 'Authenticated',
+				statusDrcomFail: 'Failed',
+				statusCasOk: 'Logged in',
+				statusCasNo: 'Not logged in',
+				statusCookiePresent: 'Present (%s)',
+				statusCookieNone: 'Absent',
+				tabAccounts: 'Accounts',
+				accountsTab: 'Accounts',
+				activeAccount: 'Active Account',
+				noAccounts: 'No accounts yet - add one below.',
+				accountHint: 'Add or manage accounts on the Accounts tab.',
+				accountAdd: 'Add Account',
+				accountSave: 'Save',
+				accountSaved: 'Account saved.',
+				accountSaveFailed: 'Failed to save account',
+				accountDelete: 'Delete',
+				accountDeleted: 'Account deleted.',
+				accountDeleteConfirm: 'Delete account %s?',
+				accountSwitched: 'Active account switched.',
+				accountSwitchFailed: 'Failed to switch account',
+				accountIdHint: 'Account id (auto if blank)',
+				accountNeedUsername: 'Please enter a username.',
+				accountBadId: 'Invalid account id.',
 				connectNow: 'Log In and Authenticate',
 				connectNowDesc: 'Ensure a login exists and run the connectivity check; skipped when already logged in.',
 				connectRunning: 'Authenticating...',
@@ -560,6 +662,57 @@ return view.extend({
 			}).catch(function() { return {}; });
 		};
 
+		// Refresh the top status card: network reachability plus the Dr.COM and
+		// CAS/cookie states. Purely local apart from the ping and the CAS probe.
+		var refreshDashboard = function() {
+			return Promise.all([
+				fs.exec('/etc/init.d/drcom_auth', [ 'overview' ]).catch(function() { return {}; }),
+				fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).catch(function() { return {}; })
+			]).then(function (res) {
+				function st(r) { return ((r && r.stdout) || '').trim(); }
+
+				// Network status: reachable / unreachable.
+				var net = st(res[0]);
+				var netNode = document.getElementById('drcom-status-network');
+				if (netNode) {
+					if (/^network=down/m.test(net) || /is down/i.test(net))
+						netNode.textContent = tr('statusNetworkDown');
+					else if (/^network=up/m.test(net) || /is up/i.test(net))
+						netNode.textContent = tr('statusNetworkUp');
+					else
+						netNode.textContent = tr('statusUnknown');
+				}
+
+				// Dr.COM auth status: last login result.
+				var drcomNode = document.getElementById('drcom-status-drcom');
+				if (drcomNode) {
+					var mres = net.match(/drcom=(\w+)/);
+					if (mres && mres[1] === 'ok')
+						drcomNode.textContent = tr('statusDrcomOk');
+					else if (mres && mres[1] === 'rejected')
+						drcomNode.textContent = tr('statusDrcomFail');
+					else
+						drcomNode.textContent = tr('statusUnknown');
+				}
+
+				// CAS + cookie status: from cas_status key=value output.
+				var cas = st(res[1]);
+				var v = {};
+				cas.split('\n').forEach(function (line) {
+					var eq = line.indexOf('=');
+					if (eq > 0) v[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+				});
+				var casNode = document.getElementById('drcom-status-cas');
+				if (casNode)
+					casNode.textContent = (v.session === 'active') ? tr('statusCasOk') : tr('statusCasNo');
+				var cookieNode = document.getElementById('drcom-status-cookie');
+				if (cookieNode)
+					cookieNode.textContent = (v.cookie === 'valid')
+						? format(tr('statusCookiePresent'), v.COOKIE_MTIME || '?')
+						: tr('statusCookieNone');
+			});
+		};
+
 		// Render the request once, from the currently saved params. Used on page
 		// load and after an explicit params fetch; never on status refreshes.
 		var loadCasRequest = function() {
@@ -573,6 +726,94 @@ return view.extend({
 				if (requestPart)
 					renderCasRequest(requestPart);
 			}).catch(function() {});
+		};
+
+		// Render the accounts manager: a row per account (username, id, active
+		// radio, delete) plus an add-account form. Reloads the page after a
+		// change so every dependent field (dropdown, rendered config) is fresh.
+		var renderAccountsEditor = function(host) {
+			if (!host)
+				return;
+			host.innerHTML = '';
+
+			var list = E('div', { 'class': 'drcom-acc-list' });
+			accounts.forEach(function(a) {
+				var activeRadio = E('input', {
+					'type': 'radio', 'name': 'drcom-active-account', 'value': a.id,
+					'checked': a.active ? 'checked' : null,
+					'change': function() { setActive(a.id); }
+				});
+				list.appendChild(E('div', { 'class': 'drcom-acc-row' }, [
+					activeRadio,
+					E('span', { 'class': 'drcom-acc-user' }, [ a.username || ('(' + a.id + ')') ]),
+					E('span', { 'class': 'drcom-acc-id' }, [ a.id ]),
+					E('button', {
+						'class': 'cbi-button cbi-button-negative', 'type': 'button',
+						'click': function() { removeAccount(a.id); }
+					}, [ tr('accountDelete') ])
+				]));
+			});
+			if (!accounts.length)
+				list.appendChild(E('div', { 'class': 'drcom-result' }, [ tr('noAccounts') ]));
+			host.appendChild(list);
+
+			var idInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': tr('accountIdHint') });
+			var userInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': '202400000000' });
+			var passInput = E('input', { 'type': 'password', 'class': 'cbi-input-text', 'placeholder': tr('password') });
+			host.appendChild(E('div', { 'class': 'drcom-acc-add' }, [
+				E('div', { 'class': 'drcom-body-label' }, [ tr('accountAdd') ]),
+				idInput, userInput, passInput,
+				E('button', {
+					'class': 'cbi-button cbi-button-action', 'type': 'button',
+					'click': function() { addAccount(idInput, userInput, passInput); }
+				}, [ tr('accountSave') ])
+			]));
+		};
+
+		var reloadSoon = function() { window.setTimeout(function() { window.location.reload(); }, 600); };
+
+		var setActive = function(id) {
+			fs.exec('/etc/init.d/drcom_auth', [ 'account_set_active', id ]).then(function() {
+				ui.addNotification(null, E('p', tr('accountSwitched')));
+				reloadSoon();
+			}).catch(function(e) {
+				ui.addNotification(null, E('p', execMessage(e) || tr('accountSwitchFailed')), 'error');
+			});
+		};
+
+		var removeAccount = function(id) {
+			if (!window.confirm(tr('accountDeleteConfirm').replace('%s', id)))
+				return;
+			fs.exec('/etc/init.d/drcom_auth', [ 'account_delete', id ]).then(function() {
+				ui.addNotification(null, E('p', tr('accountDeleted')));
+				reloadSoon();
+			}).catch(function(e) {
+				ui.addNotification(null, E('p', execMessage(e) || tr('accountSaveFailed')), 'error');
+			});
+		};
+
+		var addAccount = function(idInput, userInput, passInput) {
+			var id = (idInput.value || '').trim();
+			var user = (userInput.value || '').trim();
+			var pass = passInput.value || '';
+			if (!user) {
+				ui.addNotification(null, E('p', tr('accountNeedUsername')), 'error');
+				return;
+			}
+			// Derive a stable id when the user leaves it blank.
+			if (!id)
+				id = 'acc' + (accounts.length + 1);
+			id = id.replace(/[^A-Za-z0-9_.-]/g, '');
+			if (!id) {
+				ui.addNotification(null, E('p', tr('accountBadId')), 'error');
+				return;
+			}
+			fs.exec('/etc/init.d/drcom_auth', [ 'account_upsert', id, user, pass ]).then(function() {
+				ui.addNotification(null, E('p', tr('accountSaved')));
+				reloadSoon();
+			}).catch(function(e) {
+				ui.addNotification(null, E('p', execMessage(e) || tr('accountSaveFailed')), 'error');
+			});
 		};
 
 		m = new form.Map('drcom_auth', tr('title'), tr('desc'));
@@ -604,8 +845,43 @@ return view.extend({
 			'.drcom-tab-btn{background:transparent;color:inherit;border:1px solid var(--drcom-accent);border-bottom:none;padding:8px 18px;cursor:pointer;font-size:14px;border-radius:6px 6px 0 0;opacity:.7}',
 			'.drcom-tab-btn:hover{opacity:1}',
 			'.drcom-tab-btn.active{background:var(--drcom-accent);color:var(--drcom-accent-fg);font-weight:600;opacity:1}',
-			'.drcom-tab-pane{padding-top:2px}'
+			'.drcom-tab-pane{padding-top:2px}',
+			'.drcom-acc-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(128,128,128,.25)}',
+			'.drcom-acc-user{font-weight:600}',
+			'.drcom-acc-id{opacity:.6;font-size:12px}',
+			'.drcom-acc-row .cbi-button{margin-left:auto}',
+			'.drcom-acc-add{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}',
+			'.drcom-acc-add .drcom-body-label{flex:0 0 100%;padding:0}'
 		].join('\n'));
+
+		// Status card (first card on the Online Auth tab).
+		s = m.section(form.TypedSection, 'drcom_auth', tr('status'));
+		s.anonymous = true;
+		s.addremove = false;
+
+		o = s.option(form.DummyValue, '_status_network', tr('statusNetwork'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-status-network" class="drcom-result">' + tr('statusUnknown') + '</span>';
+		};
+
+		o = s.option(form.DummyValue, '_status_drcom', tr('statusDrcom'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-status-drcom" class="drcom-result">' + tr('statusUnknown') + '</span>';
+		};
+
+		o = s.option(form.DummyValue, '_status_cas', tr('statusCas'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-status-cas" class="drcom-result">' + tr('casCookieUnknown') + '</span>';
+		};
+
+		o = s.option(form.DummyValue, '_status_cookie', tr('casCookieStatus'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-status-cookie" class="drcom-result">' + tr('statusUnknown') + '</span>';
+		};
 
 		s = m.section(form.TypedSection, 'drcom_auth', tr('basic'));
 		s.anonymous = true;
@@ -671,18 +947,72 @@ return view.extend({
 			return '<span id="drcom-authorize-status" class="drcom-result">' + tr('authorizeIdle') + '</span>';
 		};
 
-		// Account card (own card on the Online Auth tab).
+		// Account card: pick the active account, run the one-click login and see
+		// the result. Adding/managing accounts lives on the Accounts tab.
 		s = m.section(form.TypedSection, 'drcom_auth', tr('account'));
 		s.anonymous = true;
 		s.addremove = false;
 
-		o = s.option(form.Value, 'username', tr('username'));
-		o.placeholder = '202400000000';
-		o.rmempty = false;
+		o = s.option(form.DummyValue, '_account_select', tr('activeAccount'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			if (!accounts.length)
+				return '<span class="drcom-result">' + tr('noAccounts') + '</span>';
+			var html = '<select id="drcom-account-select" class="cbi-input-select">';
+			accounts.forEach(function(a) {
+				html += '<option value="' + htmlEscape(a.id) + '"' +
+					(a.active ? ' selected="selected"' : '') + '>' +
+					htmlEscape(a.username || a.id) + '</option>';
+			});
+			return html + '</select>';
+		};
 
-		o = s.option(form.Value, 'password', tr('password'));
-		o.password = true;
-		o.rmempty = false;
+		o = s.option(form.DummyValue, '_account_hint', '');
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span class="drcom-result">' + tr('accountHint') + '</span>';
+		};
+
+		// One-click action: ensure a CAS login exists (reusing saved params,
+		// skipping when already logged in) and run the connectivity check.
+		o = s.option(form.Button, '_connect_now', tr('connectNow'));
+		o.inputtitle = tr('connectNow');
+		o.inputstyle = 'apply';
+		o.description = tr('connectNowDesc');
+		o.onclick = function() {
+			var node = document.getElementById('drcom-connect-status');
+			if (node)
+				node.textContent = tr('connectRunning');
+
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_ensure' ]).then(function(res) {
+				var node = document.getElementById('drcom-connect-status');
+				var message = execMessage(res);
+				var failed = execFailed(res, message);
+				if (/^diagnosis=/m.test(message))
+					failed = true;
+				var text = failed ? tr('connectFailed') + (message ? ': ' + message : '')
+					: tr('connectDone');
+				if (node)
+					node.textContent = text;
+				if (failed)
+					ui.addNotification(null, E('p', text), 'error');
+				else
+					ui.addNotification(null, E('p', text));
+				return refreshCasStatus();
+			}).catch(function(e) {
+				var node = document.getElementById('drcom-connect-status');
+				var message = execMessage(e) || tr('connectFailed');
+				if (node)
+					node.textContent = tr('connectFailed') + ': ' + message;
+				ui.addNotification(null, E('p', message), 'error');
+			});
+		};
+
+		o = s.option(form.DummyValue, '_connect_status', tr('connectStatus'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-connect-status" class="drcom-result">' + tr('connectIdle') + '</span>';
+		};
 
 		s = m.section(form.TypedSection, 'drcom_auth', tr('cas'));
 		s.anonymous = true;
@@ -892,45 +1222,15 @@ return view.extend({
 		o.placeholder = 'baidu.com';
 		o.rmempty = false;
 
-		// One-click action for the Online Auth tab: ensures a CAS login exists
-		// (reusing saved params, skipping when already logged in) and then runs
-		// the connectivity check. Idempotent, so pressing it again is safe.
-		o = s.option(form.Button, '_connect_now', tr('connectNow'));
-		o.inputtitle = tr('connectNow');
-		o.inputstyle = 'apply';
-		o.description = tr('connectNowDesc');
-		o.onclick = function() {
-			var node = document.getElementById('drcom-connect-status');
-			if (node)
-				node.textContent = tr('connectRunning');
+		// Accounts tab: manage multiple accounts.
+		s = m.section(form.TypedSection, 'drcom_auth', tr('accountsTab'));
+		s.anonymous = true;
+		s.addremove = false;
 
-			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_ensure' ]).then(function(res) {
-				var node = document.getElementById('drcom-connect-status');
-				var message = execMessage(res);
-				var failed = execFailed(res, message);
-				if (/^diagnosis=/m.test(message))
-					failed = true;
-				var text = failed ? tr('connectFailed') + (message ? ': ' + message : '')
-					: tr('connectDone');
-				if (node)
-					node.textContent = text;
-				if (failed)
-					ui.addNotification(null, E('p', text), 'error');
-				else
-					ui.addNotification(null, E('p', text));
-			}).catch(function(e) {
-				var node = document.getElementById('drcom-connect-status');
-				var message = execMessage(e) || tr('connectFailed');
-				if (node)
-					node.textContent = tr('connectFailed') + ': ' + message;
-				ui.addNotification(null, E('p', message), 'error');
-			});
-		};
-
-		o = s.option(form.DummyValue, '_connect_status', tr('connectStatus'));
+		o = s.option(form.DummyValue, '_accounts_editor', '');
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return '<span id="drcom-connect-status" class="drcom-result">' + tr('connectIdle') + '</span>';
+			return '<div id="drcom-accounts-editor"></div>';
 		};
 
 		// Settings tab: language + server addresses.
@@ -966,7 +1266,8 @@ return view.extend({
 			// Group the rendered sections into tabs. Sections are matched by
 			// their heading text, which is stable per language via the dict.
 			var tabs = [
-				{ id: 'online', label: tr('tabOnline'), titles: [ tr('basic'), tr('account'), tr('network') ] },
+				{ id: 'online', label: tr('tabOnline'), titles: [ tr('status'), tr('account'), tr('basic'), tr('network') ] },
+				{ id: 'accounts', label: tr('tabAccounts'), titles: [ tr('accountsTab') ] },
 				{ id: 'diag', label: tr('tabDiag'), titles: [ tr('authorize'), tr('cas'), tr('auth') ] },
 				{ id: 'settings', label: tr('tabSettings'), titles: [ tr('settings'), tr('server') ] }
 			];
@@ -1015,7 +1316,25 @@ return view.extend({
 					window.location.reload();
 				});
 			}
-			// Populate the CAS status rows, then render the saved request once.
+			// Account dropdown: switch the active account in place.
+			var acctSel = viewNode.querySelector('#drcom-account-select');
+			if (acctSel) {
+				acctSel.addEventListener('change', function() {
+					var id = acctSel.value;
+					acctSel.disabled = true;
+					fs.exec('/etc/init.d/drcom_auth', [ 'account_set_active', id ]).then(function() {
+						ui.addNotification(null, E('p', tr('accountSwitched')));
+						return refreshCasStatus();
+					}).catch(function(e) {
+						ui.addNotification(null, E('p', execMessage(e) || tr('accountSwitchFailed')), 'error');
+					}).then(function() { acctSel.disabled = false; });
+				});
+			}
+
+			renderAccountsEditor(document.getElementById('drcom-accounts-editor'));
+
+			// Populate the status card, CAS rows, then the saved request once.
+			refreshDashboard();
 			refreshCasStatus();
 			loadCasRequest();
 			return viewNode;

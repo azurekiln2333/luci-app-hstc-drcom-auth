@@ -11,6 +11,8 @@ PW='p@ss&word\test|pipe'
 
 sed \
   -e "s|__SCRIPT_DIR__|$(sed_escape "$APP_DIR")|g" \
+  -e "s|__ACCOUNT_ID__|$(sed_escape acc1)|g" \
+  -e "s|__ACCOUNT_IDS__|$(sed_escape "acc1 acc2")|g" \
   -e "s|__USER_AGENT__|$(sed_escape "$UA")|g" \
   -e "s|__WAN_PORT__|$(sed_escape eth1)|g" \
   -e "s|__DRCOM_SERVER_IP__|$(sed_escape 192.168.2.34)|g" \
@@ -32,5 +34,8 @@ logger() { :; }
 [ "$USER_AGENT" = "$UA" ] || { echo "FAIL UA: [$USER_AGENT] != [$UA]"; exit 1; }
 [ "$PASSWORD" = "$PW" ] || { echo "FAIL PW: [$PASSWORD] != [$PW]"; exit 1; }
 [ "$WAN_PORT" = "eth1" ] || { echo "FAIL WAN_PORT"; exit 1; }
+[ "$ACCOUNT_ID" = "acc1" ] || { echo "FAIL ACCOUNT_ID"; exit 1; }
+[ "$ACCOUNTS" = "acc1 acc2" ] || { echo "FAIL ACCOUNTS"; exit 1; }
+case "$COOKIE_DIR" in *"/accounts/acc1") ;; *) echo "FAIL COOKIE_DIR per-account: $COOKIE_DIR"; exit 1 ;; esac
 
 echo "OK: render + roundtrip of special characters succeeded"
