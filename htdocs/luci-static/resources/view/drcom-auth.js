@@ -3,6 +3,65 @@
 'require fs';
 'require view';
 'require ui';
+'require network';
+
+// Collect candidate WAN interfaces: LuCI logical interfaces (with their device)
+// plus raw system netdevs, so the dropdown matches what the router actually has.
+function collectInterfaces() {
+	var out = {};
+
+	// Interfaces that can never be the WAN.
+	function isVirtual(name) {
+		return !name || name === 'lo' || name === 'docker0' || name === 'ip6tnl0';
+	}
+
+	try {
+		network.getDevices().forEach(function (dev) {
+			var name = dev.getName();
+			if (name && !isVirtual(name))
+				out[name] = name;
+		});
+	} catch (e) { /* network model unavailable */ }
+
+	return Promise.all([
+		fs.exec_direct('/sbin/uci', [ '-q', 'show', 'network' ]).catch(function () { return ''; }),
+		fs.exec_direct('/bin/ls', [ '-1', '/sys/class/net' ]).catch(function () { return ''; }),
+		fs.exec_direct('/sbin/uci', [ '-q', 'get', 'drcom_auth.main.wan_port' ]).catch(function () { return ''; })
+	]).then(function (res) {
+		var uci = res[0] || '', ls = res[1] || '', current = (res[2] || '').trim();
+		var logical = {};
+
+		// Map each UCI interface to its device.
+		var lines = uci.split('\n');
+		var ifaces = {};
+		lines.forEach(function (l) {
+			var m = l.match(/^network\.([^.\[]+)\.device='([^']+)'/);
+			if (m) ifaces[m[1]] = m[2];
+		});
+
+		// Raw system netdevs (skip virtual ones that cannot be a WAN).
+		ls.split('\n').forEach(function (n) {
+			n = n.trim();
+			if (isVirtual(n))
+				return;
+			out[n] = n;
+			logical[n] = ifaces[n] || null;
+		});
+
+		// Present logical interfaces, labelled "name (device)". Skip virtual
+		// devices such as loopback so they never enter the list.
+		Object.keys(ifaces).forEach(function (lname) {
+			var dev = ifaces[lname];
+			if (isVirtual(dev))
+				return;
+			if (out[dev] === undefined)
+				out[dev] = dev;
+			logical[dev] = lname;
+		});
+
+		return { devices: Object.keys(out).sort(), logical: logical, current: current };
+	});
+}
 
 return view.extend({
 	load: function() {
@@ -14,7 +73,8 @@ return view.extend({
 					e && e.stderr,
 					e && e.message
 				].filter(function(v) { return v; }).join('\n').trim();
-			})
+			}),
+			collectInterfaces()
 		]);
 	},
 
@@ -22,6 +82,10 @@ return view.extend({
 		var m, s, o, compactStyle, lang, browserLang, tr;
 		var isEnabled = (data[0] || '').trim() === 'enabled';
 		var publicKeyStatus = (data[1] || '').trim();
+		var ifaceInfo = data[2] || { devices: [], logical: {}, current: '' };
+		var ifaceDevices = ifaceInfo.devices || [];
+		var ifaceLogical = ifaceInfo.logical || {};
+		var savedWanPort = ifaceInfo.current || '';
 		var dict = {
 			zh: {
 				title: 'Dr.COM 认证',
@@ -34,6 +98,15 @@ return view.extend({
 				tabSettings: '设置',
 				authorize: '网页授权链接获取',
 				authorizeStep: '上网第一步',
+				casStep: '上网第二步',
+				authStep: '上网第三步',
+				connectNow: '一键登录并认证',
+				connectNowDesc: '确保已登录并执行联网检测；已登录时会自动跳过。',
+				connectRunning: '认证中...',
+				connectDone: '已登录并完成联网检测。',
+				connectFailed: '登录或认证失败',
+				connectStatus: '认证结果',
+				connectIdle: '未执行',
 				getAuthorize: '获取网页授权链接',
 				authorizeStatus: '网页授权链接状态',
 				authorizeIdle: '未获取',
@@ -91,7 +164,9 @@ return view.extend({
 				doCasLogout: '清除本地会话',
 				casLogoutDone: '已清除本地 CAS 会话。',
 				wanPort: 'WAN 接口',
+				wanPortDesc: '从路由器接口列表中选择用于上网的 WAN 网口。',
 				deviceType: '设备类型',
+				deviceTypeDesc: '以什么设备登录 Dr.COM：电脑或移动设备。',
 				pc: '电脑',
 				mobile: '移动设备',
 				interval: '两次联网间隔时间',
@@ -117,6 +192,15 @@ return view.extend({
 				tabSettings: '設定',
 				authorize: '網頁授權連結取得',
 				authorizeStep: '上網第一步',
+				casStep: '上網第二步',
+				authStep: '上網第三步',
+				connectNow: '一鍵登入並認證',
+				connectNowDesc: '確保已登入並執行連網偵測；已登入時會自動略過。',
+				connectRunning: '認證中...',
+				connectDone: '已登入並完成連網偵測。',
+				connectFailed: '登入或認證失敗',
+				connectStatus: '認證結果',
+				connectIdle: '未執行',
 				getAuthorize: '取得網頁授權連結',
 				authorizeStatus: '網頁授權連結狀態',
 				authorizeIdle: '未取得',
@@ -174,7 +258,9 @@ return view.extend({
 				doCasLogout: '清除本機會話',
 				casLogoutDone: '已清除本機 CAS 工作階段。',
 				wanPort: 'WAN 介面',
+				wanPortDesc: '從路由器介面清單中選擇用於上網的 WAN 網口。',
 				deviceType: '裝置類型',
+				deviceTypeDesc: '以什麼裝置登入 Dr.COM：電腦或行動裝置。',
 				pc: '電腦',
 				mobile: '行動裝置',
 				interval: '兩次連網間隔時間',
@@ -200,6 +286,15 @@ return view.extend({
 				tabSettings: 'Settings',
 				authorize: 'Web Authorize URL',
 				authorizeStep: 'Step 1: get online',
+				casStep: 'Step 2: CAS login',
+				authStep: 'Step 3: authenticate',
+				connectNow: 'Log In and Authenticate',
+				connectNowDesc: 'Ensure a login exists and run the connectivity check; skipped when already logged in.',
+				connectRunning: 'Authenticating...',
+				connectDone: 'Logged in and connectivity check completed.',
+				connectFailed: 'Login or authentication failed',
+				connectStatus: 'Result',
+				connectIdle: 'Not run',
 				getAuthorize: 'Get Web Authorize URL',
 				authorizeStatus: 'Web Authorize URL Status',
 				authorizeIdle: 'Not requested',
@@ -257,7 +352,9 @@ return view.extend({
 				doCasLogout: 'Clear Local Session',
 				casLogoutDone: 'Local CAS session cleared.',
 				wanPort: 'WAN Interface',
+				wanPortDesc: 'Pick the WAN network interface used for authentication.',
 				deviceType: 'Device Type',
+				deviceTypeDesc: 'Which device type to register when logging in to Dr.COM (PC or mobile).',
 				pc: 'PC',
 				mobile: 'Mobile Device',
 				interval: 'Check Interval',
@@ -483,7 +580,8 @@ return view.extend({
 			'.drcom-auth-view .cbi-map-descr{margin-bottom:10px}',
 			'.drcom-auth-view .cbi-section{margin:10px 0 14px 0;padding:0;overflow:hidden}',
 			'.drcom-auth-view .cbi-section h3{margin:0;padding:14px 16px 8px 16px}',
-			'.drcom-auth-view .cbi-section-node{padding:20px 24px 22px 24px}',
+			'.drcom-auth-view .cbi-section-descr{margin:0;padding:0 16px 10px 16px;font-size:13px;font-weight:400;opacity:.75;line-height:1.4}',
+			'.drcom-auth-view .cbi-section-node{padding:12px 24px 18px 24px}',
 			'.drcom-auth-view .cbi-value{clear:both;margin-bottom:8px!important;padding-top:1px!important;padding-bottom:1px!important}',
 			'.drcom-auth-view .cbi-value:last-child{margin-bottom:0!important}',
 			'.drcom-auth-view .cbi-value-field input,.drcom-auth-view .cbi-value-field select,.drcom-auth-view .cbi-value-field textarea,.drcom-auth-view .cbi-value-field .cbi-dropdown{margin-bottom:3px!important}',
@@ -498,32 +596,50 @@ return view.extend({
 			'.drcom-body-field{width:100%;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;resize:vertical}',
 			'.drcom-body-row .cbi-button{flex:0 0 auto}',
 			'.drcom-diag-title{font-weight:600;margin-bottom:4px}',
-			'.drcom-diag-pre{background:#2b2b2b;color:#eee;padding:8px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;margin:0}',
-			'.drcom-tabs-nav{display:flex;gap:2px;border-bottom:2px solid #4a90d9;margin:4px 0 12px 0}',
-			'.drcom-tab-btn{background:#eee;border:1px solid #ccc;border-bottom:none;padding:8px 18px;cursor:pointer;font-size:14px;border-radius:6px 6px 0 0}',
-			'.drcom-tab-btn.active{background:#4a90d9;color:#fff;border-color:#4a90d9;font-weight:600}',
-			'.drcom-tab-btn:hover{background:#dbe9f7}',
-			'.drcom-tab-btn.active:hover{background:#4a90d9}'
+			'.drcom-diag-pre{background:rgba(0,0,0,.55);color:inherit;padding:8px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;margin:0}',
+			// Tabs follow the active LuCI theme: prefer bootstrap's CSS variables,
+			// then common aliases used by other themes, and finally currentColor so
+			// the bar always matches the page palette whatever the theme.
+			'.drcom-tabs-nav{--drcom-accent:var(--primary-color-medium,var(--primary,var(--main-color,currentColor)));--drcom-accent-fg:var(--on-primary-color,#fff);display:flex;gap:2px;border-bottom:2px solid var(--drcom-accent);margin:4px 0 12px 0}',
+			'.drcom-tab-btn{background:transparent;color:inherit;border:1px solid var(--drcom-accent);border-bottom:none;padding:8px 18px;cursor:pointer;font-size:14px;border-radius:6px 6px 0 0;opacity:.7}',
+			'.drcom-tab-btn:hover{opacity:1}',
+			'.drcom-tab-btn.active{background:var(--drcom-accent);color:var(--drcom-accent-fg);font-weight:600;opacity:1}',
+			'.drcom-tab-pane{padding-top:2px}'
 		].join('\n'));
 
 		s = m.section(form.TypedSection, 'drcom_auth', tr('basic'));
 		s.anonymous = true;
 		s.addremove = false;
 
-		o = s.option(form.Value, 'wan_port', tr('wanPort'));
-		o.placeholder = 'eth1';
+		// WAN interface: pick from the router's interfaces (logical name plus
+		// device when they differ). The stored value stays the netdev name.
+		o = s.option(form.ListValue, 'wan_port', tr('wanPort'));
 		o.rmempty = false;
+		o.description = tr('wanPortDesc');
+		var wanDevices = ifaceDevices.slice();
+		(function () {
+			// Keep the currently configured value selectable even if the device is
+			// not present right now (offline interface), so it is never lost.
+			if (savedWanPort && wanDevices.indexOf(savedWanPort) < 0)
+				wanDevices.push(savedWanPort);
+		})();
+		wanDevices.sort().forEach(function (dev) {
+			var lname = ifaceLogical[dev];
+			o.value(dev, (lname && lname !== dev) ? (lname + ' (' + dev + ')') : dev);
+		});
+		if (!wanDevices.length)
+			o.placeholder = 'eth1';
 
 		o = s.option(form.ListValue, 'mac_type', tr('deviceType'));
 		o.value('1', tr('pc'));
 		o.value('2', tr('mobile'));
 		o.default = '2';
+		o.description = tr('deviceTypeDesc');
 
 		s = m.section(form.TypedSection, 'drcom_auth', tr('authorize'));
 		s.anonymous = true;
 		s.addremove = false;
 		s.description = tr('authorizeStep');
-
 		o = s.option(form.Button, '_authorize', tr('getAuthorize'));
 		o.inputtitle = tr('getAuthorize');
 		o.inputstyle = 'apply';
@@ -571,6 +687,7 @@ return view.extend({
 		s = m.section(form.TypedSection, 'drcom_auth', tr('cas'));
 		s.anonymous = true;
 		s.addremove = false;
+		s.description = tr('casStep');
 
 		o = s.option(form.Value, 'hscas_url', tr('casUrl'));
 		o.placeholder = 'https://hscas.hstc.edu.cn';
@@ -727,7 +844,7 @@ return view.extend({
 		s = m.section(form.TypedSection, 'drcom_auth', tr('auth'));
 		s.anonymous = true;
 		s.addremove = false;
-		s.description = tr('authDesc');
+		s.description = tr('authStep');
 
 		o = s.option(form.Button, '_auth', tr('auth'));
 		o.inputtitle = tr('auth');
@@ -774,6 +891,47 @@ return view.extend({
 		o = s.option(form.Value, 'ping_host', tr('pingHost'));
 		o.placeholder = 'baidu.com';
 		o.rmempty = false;
+
+		// One-click action for the Online Auth tab: ensures a CAS login exists
+		// (reusing saved params, skipping when already logged in) and then runs
+		// the connectivity check. Idempotent, so pressing it again is safe.
+		o = s.option(form.Button, '_connect_now', tr('connectNow'));
+		o.inputtitle = tr('connectNow');
+		o.inputstyle = 'apply';
+		o.description = tr('connectNowDesc');
+		o.onclick = function() {
+			var node = document.getElementById('drcom-connect-status');
+			if (node)
+				node.textContent = tr('connectRunning');
+
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_ensure' ]).then(function(res) {
+				var node = document.getElementById('drcom-connect-status');
+				var message = execMessage(res);
+				var failed = execFailed(res, message);
+				if (/^diagnosis=/m.test(message))
+					failed = true;
+				var text = failed ? tr('connectFailed') + (message ? ': ' + message : '')
+					: tr('connectDone');
+				if (node)
+					node.textContent = text;
+				if (failed)
+					ui.addNotification(null, E('p', text), 'error');
+				else
+					ui.addNotification(null, E('p', text));
+			}).catch(function(e) {
+				var node = document.getElementById('drcom-connect-status');
+				var message = execMessage(e) || tr('connectFailed');
+				if (node)
+					node.textContent = tr('connectFailed') + ': ' + message;
+				ui.addNotification(null, E('p', message), 'error');
+			});
+		};
+
+		o = s.option(form.DummyValue, '_connect_status', tr('connectStatus'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-connect-status" class="drcom-result">' + tr('connectIdle') + '</span>';
+		};
 
 		// Settings tab: language + server addresses.
 		s = m.section(form.TypedSection, 'drcom_auth', tr('settings'));
