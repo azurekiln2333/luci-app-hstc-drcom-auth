@@ -24,9 +24,11 @@ DRCOM_SERVER_IP="__DRCOM_SERVER_IP__"
 HSCAS_URL="__HSCAS_URL__"
 VERIFY_URL="http://$DRCOM_SERVER_IP/"
 HSCAS_PUBLIC_KEY_URL="__HSCAS_PUBLIC_KEY_URL__"
-# The standalone CAS auth (cas_auth.sh) only needs HSCAS_URL; it derives the
-# login and public-key URLs from it and never touches Dr.COM.
-HSCAS_LOGIN_URL="$HSCAS_URL/cas/login"
+# Normalize the base URL so a setting like https://host/cas/login does not
+# produce a doubled /cas/login/cas/login path. cas_auth.sh normalizes again on
+# load, this keeps HSCAS_LOGIN_URL correct for anything sourcing config.sh.
+HSCAS_BASE_URL=$(printf '%s' "$HSCAS_URL" | sed -e 's#/*$##' -e 's#[?#].*$##' -e 's#/*$##' -e 's#/cas/login$##' -e 's#/cas$##' -e 's#/*$##')
+HSCAS_LOGIN_URL="$HSCAS_BASE_URL/cas/login"
 
 EPORTAL_API="http://$DRCOM_SERVER_IP:801/eportal/portal"
 AUTHORIZATION_API="$EPORTAL_API/cas/create"

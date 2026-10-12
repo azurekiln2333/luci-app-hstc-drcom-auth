@@ -45,6 +45,9 @@ write_config() {
 	uci_get password password ""
 	uci_get drcom_server_ip drcom_server_ip 192.168.2.34
 	uci_get hscas_url hscas_url https://hscas.hstc.edu.cn
+	# Accept either the base host or a full /cas/login URL; derive the public
+	# key URL from the normalized base so both stay consistent.
+	hscas_url=$(printf '%s' "$hscas_url" | sed -e 's#/*$##' -e 's#[?#].*$##' -e 's#/*$##' -e 's#/cas/login$##' -e 's#/cas$##' -e 's#/*$##')
 	uci_get hscas_public_key_url hscas_public_key_url "$hscas_url/cas/jwt/publicKey"
 	uci_get mac_type mac_type 2
 	uci_get user_agent user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36"

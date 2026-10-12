@@ -46,8 +46,27 @@ CAS_POST_BODY="$RESPONSE_DIR/cas_post_response.html"
 CAS_HEADERS="$COOKIE_DIR/cas_headers.txt"
 
 HSCAS_URL="${HSCAS_URL:-https://hscas.hstc.edu.cn}"
-HSCAS_LOGIN_URL="$HSCAS_URL/cas/login"
-HSCAS_PUBLIC_KEY_URL="${HSCAS_PUBLIC_KEY_URL:-$HSCAS_URL/cas/jwt/publicKey}"
+
+# Normalize HSCAS_URL so both spellings work and the user never ends up with a
+# doubled path like /cas/login/cas/login. Accepted inputs:
+#   https://hscas.hstc.edu.cn
+#   https://hscas.hstc.edu.cn/
+#   https://hscas.hstc.edu.cn/cas
+#   https://hscas.hstc.edu.cn/cas/login
+#   https://hscas.hstc.edu.cn/cas/login?service=...
+cas_normalize_base() {
+	printf '%s' "$1" \
+		| sed -e 's#/*$##' \
+		      -e 's#[?#].*$##' \
+		      -e 's#/*$##' \
+		      -e 's#/cas/login$##' \
+		      -e 's#/cas$##' \
+		      -e 's#/*$##'
+}
+
+HSCAS_BASE_URL=$(cas_normalize_base "$HSCAS_URL")
+HSCAS_LOGIN_URL="$HSCAS_BASE_URL/cas/login"
+HSCAS_PUBLIC_KEY_URL="${HSCAS_PUBLIC_KEY_URL:-$HSCAS_BASE_URL/cas/jwt/publicKey}"
 
 # The CAS login page carries three forms: fm1 (password), fm2 (SMS/dynamic
 # code), fm3 (QR). Each has its own currentMenu/_eventId, so parameters must be
