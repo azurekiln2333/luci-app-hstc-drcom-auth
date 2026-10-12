@@ -9,11 +9,47 @@ Portal + CAS 票证认证流程。
 
 ## 功能
 
+- **独立 CAS 认证**（不经过 Dr.COM）：只依赖 `HSCAS_URL`，获取 CAS 登录页参数、
+  RSA 加密密码、登录并持久化 Cookie（`TGC` / `SESSION`）
 - 网页授权链接获取（Dr.COM eportal `cas/create`）
-- CAS 登录（RSA 加密密码 → 重定向取 ticket → 验证 ticket）
+- 完整 Dr.COM 认证链（authorize → CAS → ticket → verify）
 - HSCAS 公钥拉取 / 缓存 / 状态显示
 - 联网检测（定时 ping，掉线自动重连）
 - 中文简体 / 中文繁体 / English 三语言界面
+
+## 独立 CAS 认证说明
+
+CAS 板块**不携带任何 Dr.COM 参数**，只使用配置里的 `hscas_url`。流程如下：
+
+```text
+GET  $HSCAS_URL/cas/login              → 抓取 fm1 表单参数（服务端签发）
+GET  $HSCAS_URL/cas/jwt/publicKey      → RSA 公钥
+POST $HSCAS_URL/cas/login              → password="__RSA__<密文>" + fm1 参数
+                                          → 写入 Cookie：TGC / SESSION
+```
+
+参数来源（哪些本地能生成、哪些必须服务端）：
+
+| 参数 | 来源 | 说明 |
+| --- | --- | --- |
+| `username` | 本地 | 你配置的账号 |
+| `password` | 本地 | `__RSA__` + RSA(PKCS#1 v1.5) 加密（公钥来自服务端） |
+| `submit` | 本地 | 固定值 `登录` |
+| `execution` | **服务端** | 每次会话变化，必须现场抓取，本地无法生成 |
+| `currentMenu` | **服务端** | `fm1`（密码表单）下为 `1` |
+| `failN` | **服务端** | 实测为 `-1` |
+| `_eventId` | **服务端** | `fm1` 下为 `submit` |
+| `geolocation` | **服务端** | 隐藏字段，通常为空 |
+
+注意：
+
+- 参数必须从 **`fm1`（密码表单）** 提取。页面还有 `fm2`（短信/动态码）和
+  `fm3`（扫码），它们各自的 `currentMenu` / `_eventId` 不同。
+- 密码必须 RSA 加密。明文密码会被服务器拒绝（返回验证码/失败页）。
+- `execution` 是会话绑定的，登录时**每次重新抓取**；持久化仅为状态展示与
+  Cookie 失效后重登使用。
+- Cookie（`TGC` 为核心）失效后，`cas_auth.sh ensure` 会用 `HSCAS_LOGIN_URL`
+  重新抓参数并登录，然后继续持久化。
 
 ## 目录结构
 
@@ -27,6 +63,7 @@ Portal + CAS 票证认证流程。
 │   ├── etc/init.d/drcom_auth          # procd 服务 + 认证子命令
 │   └── usr/share/drcom-auth/          # 认证 shell 脚本 + 公钥
 │       ├── config.sh.template         # 由 init.d 用 UCI 渲染成 config.sh
+│       ├── cas_auth.sh                # 独立 CAS 认证（params/login/status/ensure）
 │       ├── get_authorize_url.sh
 │       ├── hscas_login.sh
 │       ├── auto_login_and_verify.sh
@@ -88,12 +125,46 @@ opkg install luci-app-drcom-auth_1.0.0-1_all.ipk
 ## 命令行排错
 
 ```sh
+# 独立 CAS 认证
+/etc/init.d/drcom_auth cas_params     # 抓取并保存 CAS 登录参数
+/etc/init.d/drcom_auth cas_login      # 执行独立 CAS 登录并持久化 Cookie
+/etc/init.d/drcom_auth cas_status     # 查看参数 / Cookie 状态
+/etc/init.d/drcom_auth cas_ensure     # Cookie 失效时才重新登录
+
+# Dr.COM 认证链
 /etc/init.d/drcom_auth authorize            # 只取授权链接
 /etc/init.d/drcom_auth ticket               # 立即跑完整登录
 /etc/init.d/drcom_auth public_key           # 更新公钥
 /etc/init.d/drcom_auth public_key_status    # 查看公钥缓存状态
+
 tail -n 100 /usr/share/drcom-auth/logs/drcom_status_log.txt
 ```
+
+持久化文件位于 `/usr/share/drcom-auth/info/`（权限 600）：
+
+| 文件 | 内容 |
+| --- | --- |
+| `cas_params.env` | 最近一次抓取的 CAS 表单参数 |
+| `cas_cookie.txt` | CAS Cookie（`TGC` / `SESSION`） |
+| `cas_state.env` | 最近一次登录结果与时间 |
+
+## 本地测试
+
+```sh
+# 渲染 config.sh 模板（无需网络）
+sh ./scripts/test_config_render.sh
+
+# 独立 CAS 登录（需要 curl + openssl；无 openssl 时可用 shim）
+USERNAME=... PASSWORD=... sh ./scripts/test_cas_login.sh
+USERNAME=... PASSWORD=... sh ./scripts/test_cas_ensure.sh
+
+# 纯 Node 验证 RSA 加密 + 独立 CAS 登录
+node ./scripts/test_standalone_cas.mjs <username> <password>
+```
+
+`scripts/openssl-shim.mjs` 是在缺少 OpenSSL 的机器上用 Node 替代
+`openssl pkeyutl/rsautl` 的测试垫片，仅用于本地测试；路由器上使用真实的
+`openssl`（OpenWrt 包名通常为 `openssl-util`）。
 
 ## 依赖
 

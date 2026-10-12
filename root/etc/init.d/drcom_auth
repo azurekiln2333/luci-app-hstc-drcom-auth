@@ -8,10 +8,14 @@
 START=95
 STOP=10
 USE_PROCD=1
-EXTRA_COMMANDS="authorize ticket login public_key public_key_status"
+EXTRA_COMMANDS="authorize ticket login cas_params cas_login cas_status cas_ensure public_key public_key_status"
 EXTRA_HELP="	authorize		Get the Dr.COM authorize URL only
-	ticket			Run the full login flow now
+	ticket			Run the full Dr.COM login flow now
 	login			Alias of ticket
+	cas_params		Fetch and save the standalone CAS login parameters
+	cas_login		Perform a standalone CAS login (no Dr.COM)
+	cas_status		Show saved CAS parameters and cookie status
+	cas_ensure		CAS login only when the stored cookie is missing/expired
 	public_key		Update the cached HSCAS RSA public key
 	public_key_status	Show cached HSCAS RSA public key status"
 
@@ -97,6 +101,31 @@ ticket() {
 
 login() {
 	ticket "$@"
+}
+
+# Fetch the standalone CAS login page and save the session-bound parameters
+# (execution / currentMenu / failN / _eventId). No Dr.COM involvement.
+cas_params() {
+	write_config
+	/bin/sh "$APP_DIR/cas_auth.sh" params
+}
+
+# Perform a standalone CAS login and persist cookies under /usr/share/drcom-auth/info.
+cas_login() {
+	write_config
+	/bin/sh "$APP_DIR/cas_auth.sh" login
+}
+
+# Report saved CAS parameters and cookie status.
+cas_status() {
+	write_config
+	/bin/sh "$APP_DIR/cas_auth.sh" status
+}
+
+# CAS login only when the stored cookie is missing or expired.
+cas_ensure() {
+	write_config
+	/bin/sh "$APP_DIR/cas_auth.sh" ensure
 }
 
 public_key() {

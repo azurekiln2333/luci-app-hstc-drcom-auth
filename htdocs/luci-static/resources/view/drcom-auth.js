@@ -54,6 +54,27 @@ return view.extend({
 				publicKeyDone: '公钥已更新',
 				publicKeyFailed: '公钥更新失败',
 				publicKeyUpdatedAt: '公钥已更新：%s（%s）',
+				casParams: 'CAS 登录参数',
+				fetchCasParams: '获取 CAS 参数',
+				casParamsStatus: 'CAS 参数状态',
+				casParamsIdle: '未获取',
+				casParamsFetching: '获取中...',
+				casParamsGot: '已获取 %s：currentMenu=%s，failN=%s，_eventId=%s，execution=%s',
+				casParamsFailed: '获取 CAS 参数失败',
+				casUrlDesc: '仅使用该地址进行独立 CAS 认证，不经过 Dr.COM。',
+				casParamsSaved: '已保存参数：currentMenu=%s，failN=%s，_eventId=%s（%s）',
+				casLogin: 'CAS 登录',
+				doCasLogin: '获取 Cookie 并登录',
+				casLoggingIn: '登录中...',
+				casLoginDone: 'CAS 登录成功，Cookie 已保存。',
+				casLoginFailed: 'CAS 登录失败',
+				casCookieStatus: 'Cookie 状态',
+				casCookieUnknown: '未检测',
+				casCookieValid: '有效（%s）',
+				casCookieInvalid: '无效或已过期，请重新登录',
+				casRefresh: 'Cookie 状态',
+				refreshCasStatus: '刷新状态',
+				authDesc: '使用 Dr.COM 网页授权链接完成完整认证（需先获取授权链接）。',
 				wanPort: 'WAN 接口',
 				deviceType: '设备类型',
 				pc: '电脑',
@@ -101,6 +122,27 @@ return view.extend({
 				publicKeyDone: '公鑰已更新',
 				publicKeyFailed: '公鑰更新失敗',
 				publicKeyUpdatedAt: '公鑰已更新：%s（%s）',
+				casParams: 'CAS 登入參數',
+				fetchCasParams: '取得 CAS 參數',
+				casParamsStatus: 'CAS 參數狀態',
+				casParamsIdle: '未取得',
+				casParamsFetching: '取得中...',
+				casParamsGot: '已取得 %s：currentMenu=%s，failN=%s，_eventId=%s，execution=%s',
+				casParamsFailed: '取得 CAS 參數失敗',
+				casUrlDesc: '僅使用此位址進行獨立 CAS 認證，不經過 Dr.COM。',
+				casParamsSaved: '已儲存參數：currentMenu=%s，failN=%s，_eventId=%s（%s）',
+				casLogin: 'CAS 登入',
+				doCasLogin: '取得 Cookie 並登入',
+				casLoggingIn: '登入中...',
+				casLoginDone: 'CAS 登入成功，Cookie 已儲存。',
+				casLoginFailed: 'CAS 登入失敗',
+				casCookieStatus: 'Cookie 狀態',
+				casCookieUnknown: '未偵測',
+				casCookieValid: '有效（%s）',
+				casCookieInvalid: '無效或已過期，請重新登入',
+				casRefresh: 'Cookie 狀態',
+				refreshCasStatus: '重新整理狀態',
+				authDesc: '使用 Dr.COM 網頁授權連結完成完整認證（需先取得授權連結）。',
 				wanPort: 'WAN 介面',
 				deviceType: '裝置類型',
 				pc: '電腦',
@@ -148,6 +190,27 @@ return view.extend({
 				publicKeyDone: 'Public key updated',
 				publicKeyFailed: 'Public key update failed',
 				publicKeyUpdatedAt: 'Public key updated: %s (%s)',
+				casParams: 'CAS Login Parameters',
+				fetchCasParams: 'Fetch CAS Parameters',
+				casParamsStatus: 'CAS Parameter Status',
+				casParamsIdle: 'Not fetched',
+				casParamsFetching: 'Fetching...',
+				casParamsGot: 'Got %s: currentMenu=%s, failN=%s, _eventId=%s, execution=%s',
+				casParamsFailed: 'Fetch CAS parameters failed',
+				casUrlDesc: 'Standalone CAS authentication uses this URL only; Dr.COM is not involved.',
+				casParamsSaved: 'Saved params: currentMenu=%s, failN=%s, _eventId=%s (%s)',
+				casLogin: 'CAS Login',
+				doCasLogin: 'Get Cookie and Log In',
+				casLoggingIn: 'Logging in...',
+				casLoginDone: 'CAS login succeeded, cookie saved.',
+				casLoginFailed: 'CAS login failed',
+				casCookieStatus: 'Cookie Status',
+				casCookieUnknown: 'Not checked',
+				casCookieValid: 'Valid (%s)',
+				casCookieInvalid: 'Invalid or expired; log in again',
+				casRefresh: 'Cookie Status',
+				refreshCasStatus: 'Refresh Status',
+				authDesc: 'Complete the full Dr.COM flow using the web authorize URL (fetch it first).',
 				wanPort: 'WAN Interface',
 				deviceType: 'Device Type',
 				pc: 'PC',
@@ -218,6 +281,60 @@ return view.extend({
 		};
 		var execFailed = function(obj, message) {
 			return (obj && obj.code) || /(^|\n).*failed:/i.test(message || '');
+		};
+		// Turn the key=value dump from `cas_params` into a readable summary.
+		var casParamsText = function(raw) {
+			var values = {};
+			String(raw || '').split('\n').forEach(function(line) {
+				var eq = line.indexOf('=');
+				if (eq > 0)
+					values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+			});
+			if (!values.execution)
+				return raw;
+
+			var exec = values.execution;
+			var shortExec = exec.length > 24 ? exec.slice(0, 24) + '…' : exec;
+			return format(tr('casParamsGot'),
+				values.form || 'fm1',
+				values.currentMenu || '?',
+				values.failN || '?',
+				values._eventId || '?',
+				shortExec);
+		};
+		// Query the backend for current CAS params/cookie state and update the
+		// status rows. Kept as a closure so both load() and the buttons use it.
+		var refreshCasStatus = function() {
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).then(function(res) {
+				var raw = (res && res.stdout ? res.stdout : '').trim();
+				var values = {};
+				raw.split('\n').forEach(function(line) {
+					var eq = line.indexOf('=');
+					if (eq > 0)
+						values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+				});
+
+				var paramsNode = document.getElementById('drcom-cas-params-status');
+				if (paramsNode) {
+					if (values.params === 'none')
+						paramsNode.textContent = tr('casParamsIdle');
+					else
+						paramsNode.textContent = format(tr('casParamsSaved'),
+							values.params_currentMenu || '?',
+							values.params_failN || '?',
+							values.params_eventId || '?',
+							values.params_captured || '?');
+				}
+
+				var cookieNode = document.getElementById('drcom-cas-cookie-status');
+				if (cookieNode) {
+					if (values.cookie === 'valid')
+						cookieNode.textContent = format(tr('casCookieValid'), values.COOKIE_MTIME || '?');
+					else
+						cookieNode.textContent = tr('casCookieInvalid');
+				}
+				return values;
+			}).catch(function() { return {}; });
 		};
 
 		m = new form.Map('drcom_auth', tr('title'), tr('desc'));
@@ -306,6 +423,12 @@ return view.extend({
 		o.password = true;
 		o.rmempty = false;
 
+		o = s.option(form.Value, 'hscas_url', tr('casUrl'));
+		o.placeholder = 'https://hscas.hstc.edu.cn';
+		o.default = 'https://hscas.hstc.edu.cn';
+		o.rmempty = false;
+		o.description = tr('casUrlDesc');
+
 		o = s.option(form.Value, 'hscas_public_key_url', tr('publicKeyUrl'));
 		o.placeholder = 'https://hscas.hstc.edu.cn/cas/jwt/publicKey';
 		o.default = 'https://hscas.hstc.edu.cn/cas/jwt/publicKey';
@@ -342,9 +465,79 @@ return view.extend({
 			return '<span id="drcom-public-key-status" class="drcom-result">' + htmlEscape(publicKeyStatusText(publicKeyStatus)) + '</span>';
 		};
 
+		// --- standalone CAS: fetch server-issued params ---
+		o = s.option(form.Button, '_cas_params', tr('casParams'));
+		o.inputtitle = tr('fetchCasParams');
+		o.inputstyle = 'apply';
+		o.onclick = function() {
+			var node = document.getElementById('drcom-cas-params-status');
+			if (node)
+				node.textContent = tr('casParamsFetching');
+
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_params' ]).then(function(res) {
+				var node = document.getElementById('drcom-cas-params-status');
+				var output = (res && res.stdout ? res.stdout : '').trim();
+				var failed = execFailed(res, execMessage(res));
+				var text = output ? casParamsText(output) : (execMessage(res) || tr('casParamsFailed'));
+				if (node)
+					node.textContent = text;
+				if (failed)
+					ui.addNotification(null, E('p', execMessage(res) || tr('casParamsFailed')), 'error');
+			}).catch(function(e) {
+				var node = document.getElementById('drcom-cas-params-status');
+				var message = execMessage(e) || tr('casParamsFailed');
+				if (node)
+					node.textContent = tr('casParamsFailed') + ': ' + message;
+				ui.addNotification(null, E('p', message), 'error');
+			});
+		};
+
+		o = s.option(form.DummyValue, '_cas_params_status', tr('casParamsStatus'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-cas-params-status" class="drcom-result">' + tr('casParamsIdle') + '</span>';
+		};
+
+		// --- standalone CAS: perform login and persist cookies ---
+		o = s.option(form.Button, '_cas_login', tr('casLogin'));
+		o.inputtitle = tr('doCasLogin');
+		o.inputstyle = 'apply';
+		o.onclick = function() {
+			var node = document.getElementById('drcom-cas-cookie-status');
+			if (node)
+				node.textContent = tr('casLoggingIn');
+
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_login' ]).then(function(res) {
+				var message = execMessage(res);
+				var failed = execFailed(res, message);
+				var text = failed ? tr('casLoginFailed') + (message ? ': ' + message : '')
+					: tr('casLoginDone');
+				ui.addNotification(null, E('p', text), failed ? 'error' : undefined);
+				return refreshCasStatus();
+			}).catch(function(e) {
+				var message = execMessage(e) || tr('casLoginFailed');
+				ui.addNotification(null, E('p', message), 'error');
+				return refreshCasStatus();
+			});
+		};
+
+		o = s.option(form.DummyValue, '_cas_cookie_status', tr('casCookieStatus'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-cas-cookie-status" class="drcom-result">' + tr('casCookieUnknown') + '</span>';
+		};
+
+		o = s.option(form.Button, '_cas_refresh', tr('casRefresh'));
+		o.inputtitle = tr('refreshCasStatus');
+		o.inputstyle = 'apply';
+		o.onclick = function() {
+			return refreshCasStatus();
+		};
+
 		o = s.option(form.Button, '_auth', tr('auth'));
 		o.inputtitle = tr('auth');
 		o.inputstyle = 'apply';
+		o.description = tr('authDesc');
 		o.onclick = function() {
 			var node = document.getElementById('drcom-auth-status');
 			if (node)
@@ -397,10 +590,6 @@ return view.extend({
 		o.placeholder = '192.168.2.34';
 		o.rmempty = false;
 
-		o = s.option(form.Value, 'hscas_url', tr('casUrl'));
-		o.placeholder = 'https://hscas.hstc.edu.cn';
-		o.rmempty = false;
-
 		o = s.option(form.Value, 'user_agent', tr('userAgent'));
 		o.rmempty = false;
 
@@ -413,6 +602,8 @@ return view.extend({
 					window.location.reload();
 				});
 			}
+			// Populate the CAS params/cookie status rows from the backend.
+			refreshCasStatus();
 			return viewNode;
 		});
 	}

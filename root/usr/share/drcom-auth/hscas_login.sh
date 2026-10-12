@@ -1,15 +1,24 @@
 #!/bin/sh
-# Step 2 of the Dr.COM HSTC auth flow.
+# Step 2 of the Dr.COM HSTC auth flow (CAS login as part of the Dr.COM chain).
 #
 # Usage: hscas_login.sh <AUTHORIZE_URI>
 #
 # When AUTHORIZE_URI is omitted, get_authorize_url.sh is called first so the
 # script can be run standalone.
 #
+# This is the Dr.COM-coupled path: the authorize URI carries a service= that
+# points back at the Dr.COM portal, so a successful login yields a ticket that
+# Dr.COM can verify. For authentication against CAS alone (no Dr.COM), use
+# cas_auth.sh instead.
+#
 # Flow:
-#   A) load the CAS login page and scrape the execution token
+#   A) load the CAS login page and scrape flow state from the PASSWORD form
 #   B) POST the RSA-encrypted password and follow the redirect to get a ticket
 #   C) verify the ticket; a 302 on verification counts as success
+#
+# CAS flow state (execution / currentMenu / failN) is session-bound and cannot
+# be reused: it is tied to the cookie jar and regenerated on every login page
+# load. We therefore always refetch it before every POST.
 #
 # Exit codes:
 #   0  ticket verification succeeded
@@ -27,6 +36,32 @@ else
 	exit 1
 fi
 
+# The password form in the HSTC CAS page is <el-form id="fm1">. The page also
+# carries fm2 (SMS/dynamic code) and fm3 (QR), each with their own
+# currentMenu/_eventId, so parameters MUST be read from fm1 only.
+CAS_LOGIN_FORM_ID="fm1"
+
+# Extract a hidden input value from the body of a form.
+cas_form_field() {
+	local form_id="$1" field="$2" forms start end slice value
+
+	forms=$(grep -n -E '<(el-)?form[^>]*id="fm[0-9]+"' "$LOGIN_PAGE_CONTENT")
+	[ -n "$forms" ] || return 1
+
+	start=$(printf '%s\n' "$forms" | awk -F: -v id="$form_id" '$0 ~ ("id=\"" id "\"") { print $1; exit }')
+	[ -n "$start" ] || return 1
+
+	end=$(printf '%s\n' "$forms" | awk -F: -v s="$start" '$1 > s { print $1; exit }')
+	[ -n "$end" ] || end=$(( $(wc -l < "$LOGIN_PAGE_CONTENT") + 1 ))
+
+	slice=$(mktemp)
+	sed -n "${start},$((end - 1))p" "$LOGIN_PAGE_CONTENT" > "$slice"
+	value=$(sed -n "s/.*name=\"$field\"[^>]*value=\"\([^\"]*\)\".*/\1/p" "$slice" | head -n 1)
+	rm -f "$slice"
+
+	printf '%s\n' "$value"
+}
+
 AUTHORIZE_URI="$1"
 if [ -z "$AUTHORIZE_URI" ]; then
 	# stdout only carries the URL; diagnostics stay on stderr.
@@ -40,15 +75,19 @@ fi
 output_status "$LOG_FILE" "Received AUTHORIZE URI: $AUTHORIZE_URI"
 output_status "$LOG_FILE" "Loading HSCAS login page to fetch execution token"
 LOGIN_PAGE_RESPONSE=$(curl -L -c "$COOKIE_FILE" -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -o "$LOGIN_PAGE_CONTENT" -w "%{http_code}" "$AUTHORIZE_URI")
-EXECUTION=$(sed -n 's/.*name="execution" value="\([^"]*\)".*/\1/p' "$LOGIN_PAGE_CONTENT" | head -n 1)
+
+EXECUTION=$(cas_form_field "$CAS_LOGIN_FORM_ID" execution)
 if [ -z "$EXECUTION" ]; then
-	output_status "$STATUS_LOG_FILE" "HSCAS login failed: execution token not found, HTTP $LOGIN_PAGE_RESPONSE"
+	output_status "$STATUS_LOG_FILE" "HSCAS login failed: execution token not found in form $CAS_LOGIN_FORM_ID, HTTP $LOGIN_PAGE_RESPONSE"
 	exit 1
 fi
-CURRENT_MENU=$(sed -n 's/.*name="currentMenu" value="\([^"]*\)".*/\1/p' "$LOGIN_PAGE_CONTENT" | head -n 1)
-FAIL_N=$(sed -n 's/.*name="failN" value="\([^"]*\)".*/\1/p' "$LOGIN_PAGE_CONTENT" | head -n 1)
+CURRENT_MENU=$(cas_form_field "$CAS_LOGIN_FORM_ID" currentMenu)
+FAIL_N=$(cas_form_field "$CAS_LOGIN_FORM_ID" failN)
+EVENT_ID=$(cas_form_field "$CAS_LOGIN_FORM_ID" _eventId)
+GEOLOCATION=$(cas_form_field "$CAS_LOGIN_FORM_ID" geolocation)
 CURRENT_MENU=${CURRENT_MENU:-1}
 FAIL_N=${FAIL_N:-0}
+EVENT_ID=${EVENT_ID:-submit}
 
 if [ ! -s "$PUBLIC_KEY_FILE" ] && [ -s "$DEFAULT_PUBLIC_KEY_FILE" ]; then
 	cp "$DEFAULT_PUBLIC_KEY_FILE" "$PUBLIC_KEY_FILE"
@@ -103,8 +142,8 @@ POST_RESPONSE=$(curl -c "$COOKIE_FILE" -b "$COOKIE_FILE" -H "User-Agent: $USER_A
 	--data-urlencode "currentMenu=$CURRENT_MENU" \
 	--data-urlencode "failN=$FAIL_N" \
 	--data-urlencode "execution=$EXECUTION" \
-	--data-urlencode "_eventId=submit" \
-	--data-urlencode "geolocation=" \
+	--data-urlencode "_eventId=$EVENT_ID" \
+	--data-urlencode "geolocation=$GEOLOCATION" \
 	--data-urlencode "submit=登录" \
 	"$AUTHORIZE_URI")
 
