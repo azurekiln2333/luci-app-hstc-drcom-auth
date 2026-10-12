@@ -59,7 +59,6 @@ return view.extend({
 				casParamsStatus: 'CAS 参数状态',
 				casParamsIdle: '未获取',
 				casParamsFetching: '获取中...',
-				casParamsGot: '已获取 %s：currentMenu=%s，failN=%s，_eventId=%s，execution=%s',
 				casParamsFailed: '获取 CAS 参数失败',
 				casUrlDesc: '基础地址或完整登录地址均可，例如 https://hscas.hstc.edu.cn 或 https://hscas.hstc.edu.cn/cas/login。',
 				casParamsSaved: '已保存参数：currentMenu=%s，failN=%s，_eventId=%s（%s）',
@@ -75,15 +74,7 @@ return view.extend({
 				casRefresh: 'Cookie 状态',
 				refreshCasStatus: '刷新状态',
 				authDesc: '使用 Dr.COM 网页授权链接完成完整认证（需先获取授权链接）。',
-				casBody: 'CAS 请求体',
-				showCasBody: '查看/复制请求体',
-				casBodyLoading: '生成中...',
-				casBodyFailed: '生成请求体失败',
 				casEncryptedPassword: '加密后密码',
-				casPasswordPrefix: '密码前缀',
-				casPasswordLength: '密码长度',
-				casFieldOrder: '字段顺序',
-				casUrlencoded: 'URL 编码',
 				casHeaders: '请求头',
 				casRequestBody: '完整请求体',
 				casRequestLine: '请求行',
@@ -145,7 +136,6 @@ return view.extend({
 				casParamsStatus: 'CAS 參數狀態',
 				casParamsIdle: '未取得',
 				casParamsFetching: '取得中...',
-				casParamsGot: '已取得 %s：currentMenu=%s，failN=%s，_eventId=%s，execution=%s',
 				casParamsFailed: '取得 CAS 參數失敗',
 				casUrlDesc: '基礎位址或完整登入位址均可，例如 https://hscas.hstc.edu.cn 或 https://hscas.hstc.edu.cn/cas/login。',
 				casParamsSaved: '已儲存參數：currentMenu=%s，failN=%s，_eventId=%s（%s）',
@@ -161,15 +151,7 @@ return view.extend({
 				casRefresh: 'Cookie 狀態',
 				refreshCasStatus: '重新整理狀態',
 				authDesc: '使用 Dr.COM 網頁授權連結完成完整認證（需先取得授權連結）。',
-				casBody: 'CAS 請求體',
-				showCasBody: '檢視/複製請求體',
-				casBodyLoading: '產生中...',
-				casBodyFailed: '產生請求體失敗',
 				casEncryptedPassword: '加密後密碼',
-				casPasswordPrefix: '密碼前綴',
-				casPasswordLength: '密碼長度',
-				casFieldOrder: '欄位順序',
-				casUrlencoded: 'URL 編碼',
 				casHeaders: '請求標頭',
 				casRequestBody: '完整請求體',
 				casRequestLine: '請求行',
@@ -231,7 +213,6 @@ return view.extend({
 				casParamsStatus: 'CAS Parameter Status',
 				casParamsIdle: 'Not fetched',
 				casParamsFetching: 'Fetching...',
-				casParamsGot: 'Got %s: currentMenu=%s, failN=%s, _eventId=%s, execution=%s',
 				casParamsFailed: 'Fetch CAS parameters failed',
 				casUrlDesc: 'Either the base host or the full login URL works, e.g. https://hscas.hstc.edu.cn or https://hscas.hstc.edu.cn/cas/login.',
 				casParamsSaved: 'Saved params: currentMenu=%s, failN=%s, _eventId=%s (%s)',
@@ -247,15 +228,7 @@ return view.extend({
 				casRefresh: 'Cookie Status',
 				refreshCasStatus: 'Refresh Status',
 				authDesc: 'Complete the full Dr.COM flow using the web authorize URL (fetch it first).',
-				casBody: 'CAS Request Body',
-				showCasBody: 'Show / Copy Request Body',
-				casBodyLoading: 'Generating...',
-				casBodyFailed: 'Failed to build request body',
 				casEncryptedPassword: 'Encrypted Password',
-				casPasswordPrefix: 'Password Prefix',
-				casPasswordLength: 'Password Length',
-				casFieldOrder: 'Field Order',
-				casUrlencoded: 'URL Encoded',
 				casHeaders: 'Request Headers',
 				casRequestBody: 'Full Request Body',
 				casRequestLine: 'Request Line',
@@ -336,26 +309,6 @@ return view.extend({
 		var execFailed = function(obj, message) {
 			return (obj && obj.code) || /(^|\n).*failed:/i.test(message || '');
 		};
-		// Turn the key=value dump from `cas_params` into a readable summary.
-		var casParamsText = function(raw) {
-			var values = {};
-			String(raw || '').split('\n').forEach(function(line) {
-				var eq = line.indexOf('=');
-				if (eq > 0)
-					values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-			});
-			if (!values.execution)
-				return raw;
-
-			var exec = values.execution;
-			var shortExec = exec.length > 24 ? exec.slice(0, 24) + '…' : exec;
-			return format(tr('casParamsGot'),
-				values.form || 'fm1',
-				values.currentMenu || '?',
-				values.failN || '?',
-				values._eventId || '?',
-				shortExec);
-		};
 		// Render a failure diagnosis in the shared detail box so the raw output
 		// (HTTP code, curl error, page head, saved paths) is visible to the user.
 		var showDiag = function(title, text) {
@@ -370,29 +323,6 @@ return view.extend({
 				E('p', {}, [ title ]),
 				E('pre', { 'class': 'drcom-diag-pre' }, [ String(text || '') ])
 			]), 'error');
-		};
-
-		// Render the `cas_body` key=value output: a copyable encrypted password
-		// row and the full url-encoded request body.
-		var renderCasBody = function(raw) {
-			var box = document.getElementById('drcom-cas-body-box');
-			if (!box)
-				return;
-			var values = {};
-			String(raw || '').split('\n').forEach(function(line) {
-				var eq = line.indexOf('=');
-				if (eq > 0)
-					values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
-			});
-			box.innerHTML = '';
-			box.appendChild(casFieldRow(tr('casEncryptedPassword'), values.encrypted_password || ''));
-			box.appendChild(casFieldRow(tr('casPasswordPrefix'), values.password_prefix || ''));
-			box.appendChild(casFieldRow(tr('casPasswordLength'), values.password_length || ''));
-			box.appendChild(casFieldRow(tr('casFieldOrder'), values.field_order || ''));
-			box.appendChild(casFieldRow(tr('casUrlencoded'), values.urlencoded || ''));
-			box.appendChild(casFieldRow(tr('casHeaders'), (values.headers || '').replace(/\|/g, '\n')));
-			box.appendChild(casFieldRow(tr('casRequestBody'), values.body || ''));
-			box.style.display = '';
 		};
 
 		// Render the raw HTTP request from `cas_params` (request line, headers
@@ -475,6 +405,16 @@ return view.extend({
 		var refreshCasStatus = function() {
 			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).then(function(res) {
 				var raw = (res && res.stdout ? res.stdout : '').trim();
+
+				// Split off the inline request block, if present.
+				var requestPart = '';
+				var marker = raw.indexOf('\n---request---\n');
+				if (marker >= 0) {
+					requestPart = raw.slice(marker + '\n---request---\n'.length)
+						.replace(/---end-request---[\s\S]*$/, '').trim();
+					raw = raw.slice(0, marker);
+				}
+
 				var values = {};
 				raw.split('\n').forEach(function(line) {
 					var eq = line.indexOf('=');
@@ -501,6 +441,11 @@ return view.extend({
 					else
 						cookieNode.textContent = tr('casCookieInvalid');
 				}
+
+				// Show the assembled request inline (no button needed).
+				if (requestPart)
+					renderCasRequest(requestPart);
+
 				return values;
 			}).catch(function() { return {}; });
 		};
@@ -655,33 +600,20 @@ return view.extend({
 			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_params' ]).then(function(res) {
 				var node = document.getElementById('drcom-cas-params-status');
 				var output = (res && res.stdout ? res.stdout : '').trim();
-				// A diagnosis= line means the script reported a structured failure.
-				if (/^diagnosis=/m.test(output)) {
+				if (/^diagnosis=/m.test(output) && !/\n---request---\n/.test(output)) {
 					if (node)
 						node.textContent = tr('casParamsFailed');
 					showDiag(tr('casParamsFailed'), output);
 					return;
 				}
-				var failed = execFailed(res, execMessage(res));
-				if (failed && !/\n---request---\n/.test(output)) {
+				if (execFailed(res, execMessage(res)) && !/\n---request---\n/.test(output)) {
 					if (node)
 						node.textContent = tr('casParamsFailed');
 					showDiag(tr('casParamsFailed'), output || execMessage(res));
 					return;
 				}
-
-				var paramsPart = output, requestPart = '';
-				var marker = output.indexOf('\n---request---\n');
-				if (marker >= 0) {
-					paramsPart = output.slice(0, marker).trim();
-					requestPart = output.slice(marker + '\n---request---\n'.length);
-					requestPart = requestPart.replace(/---end-request---[\s\S]*$/, '').trim();
-				}
-
-				if (node)
-					node.textContent = casParamsText(paramsPart);
-				if (requestPart)
-					renderCasRequest(requestPart);
+				// Reflect the freshly captured params and request inline.
+				return refreshCasStatus();
 			}).catch(function(e) {
 				var node = document.getElementById('drcom-cas-params-status');
 				if (node)
@@ -696,52 +628,12 @@ return view.extend({
 			return '<span id="drcom-cas-params-status" class="drcom-result">' + tr('casParamsIdle') + '</span>';
 		};
 
-		// Show the assembled request (headers + body) so it can be inspected and
-		// copied. Shared by the fetch-params flow and the explicit button.
-		var fetchAndShowCasBody = function() {
-			var box = document.getElementById('drcom-cas-body-box');
-			var status = document.getElementById('drcom-cas-body-status');
-			if (status)
-				status.textContent = tr('casBodyLoading');
-			if (box)
-				box.style.display = 'none';
-
-			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_body' ]).then(function(res) {
-				var output = (res && res.stdout ? res.stdout : '').trim();
-				if (/^diagnosis=/m.test(output)) {
-					if (status)
-						status.textContent = '';
-					showDiag(tr('casBodyFailed'), output);
-					return;
-				}
-				if (execFailed(res, execMessage(res)) || !output) {
-					if (status)
-						status.textContent = '';
-					showDiag(tr('casBodyFailed'), output || execMessage(res));
-					return;
-				}
-				if (status)
-					status.textContent = '';
-				renderCasBody(output);
-			}).catch(function(e) {
-				if (status)
-					status.textContent = '';
-				showDiag(tr('casBodyFailed'), execMessage(e));
-			});
-		};
-
-		o = s.option(form.Button, '_cas_body', tr('casBody'));
-		o.inputtitle = tr('showCasBody');
-		o.inputstyle = 'apply';
-		o.onclick = function() {
-			return fetchAndShowCasBody();
-		};
-
+		// Inline container where the assembled request is rendered (no button:
+		// it is filled by the fetch-params flow and on page load).
 		o = s.option(form.DummyValue, '_cas_body_status', '');
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return '<span id="drcom-cas-body-status" class="drcom-result"></span>' +
-				'<div id="drcom-cas-body-box" class="drcom-body-box" style="display:none"></div>';
+			return '<div id="drcom-cas-body-box" class="drcom-body-box" style="display:none"></div>';
 		};
 
 		// --- standalone CAS: perform login and persist cookies ---

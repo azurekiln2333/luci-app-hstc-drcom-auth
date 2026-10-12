@@ -555,6 +555,11 @@ cmd_status() {
 		printf 'params_eventId=%s\n' "${CAS_EVENT_ID:-}"
 		printf 'params_execution=%s\n' "${CAS_EXECUTION:-}"
 		printf 'params_saved=%s\n' "$CAS_PARAMS_FILE"
+		# Include the assembled request so the panel can show it inline
+		# without a separate round-trip.
+		printf '\n---request---\n'
+		cmd_request_inner 2>&1 || true
+		printf '%s\n' '---end-request---'
 	else
 		printf 'params=none\n'
 	fi
