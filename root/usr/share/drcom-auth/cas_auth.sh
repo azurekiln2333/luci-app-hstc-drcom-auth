@@ -218,15 +218,6 @@ load_persisted_params() {
 	return 0
 }
 
-# Seconds since the persisted params were captured, or a large number if
-# unknown. Used to decide whether they are still worth reusing.
-params_age() {
-	local now
-	[ -n "$CAS_CAPTURED_EPOCH" ] || { printf '999999\n'; return 0; }
-	now=$(date '+%s' 2>/dev/null || echo 0)
-	printf '%s\n' "$((now - CAS_CAPTURED_EPOCH))"
-}
-
 # Base64-encode stdin. Prefer a `base64` command, fall back to `openssl base64`
 # (openssl is already a hard runtime requirement) because some stripped-down
 # images ship neither coreutils-base64 nor busybox base64.
@@ -473,57 +464,12 @@ cas_cookie_valid() {
 	return 0
 }
 
-# Ask the CAS server whether our current cookie jar already has an active
-# session. The server redirects /cas/login to a success page (no fm1 form) when
-# a session exists. Echoes one of: active | inactive | unknown.
-cas_server_session_state() {
-	local http_code page
-
-	page=$(mktemp)
-	http_code=$(curl --connect-timeout "$CAS_CONNECT_TIMEOUT" --max-time "$CAS_MAX_TIME" \
-		-L -b "$CAS_COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s \
-		-o "$page" -w "%{http_code}" "$HSCAS_LOGIN_URL" 2>/dev/null) || {
-		rm -f "$page"
-		printf 'unknown\n'
-		return 0
-	}
-
-	if [ "$http_code" != "200" ]; then
-		rm -f "$page"
-		printf 'unknown\n'
-		return 0
-	fi
-
-	if grep -q 'id="fm1"' "$page" 2>/dev/null; then
-		printf 'inactive\n'
-	elif grep -q -iE 'successRedirectUrl|Log In Successful|登录成功' "$page" 2>/dev/null; then
-		printf 'active\n'
-	else
-		printf 'unknown\n'
-	fi
-	rm -f "$page"
-}
-
-# Single coherent session state for the panel. Combines the local cookie with
-# the server view so the UI can never claim "cookie invalid" while the server
-# still holds a live session. Echoes: active | inactive | unknown.
-cas_session_state() {
-	local server
-
-	if cas_cookie_valid; then
-		printf 'active\n'
-		return 0
-	fi
-
-	server=$(cas_server_session_state)
-	printf '%s\n' "$server"
-}
-
 # --- sub-commands -----------------------------------------------------------
 cmd_params() {
-	# On failure the diagnosis lines were already printed to stdout so the
-	# caller (LuCI) can show the real reason. Return code 2 means "already
-	# logged in": report it and stop, there are no form params to emit.
+	local rc
+	# Explicit refresh: this is the ONLY place params are fetched. On failure
+	# the diagnosis lines were already printed to stdout. Return code 2 means
+	# "already logged in": report it and stop, there are no form params.
 	fetch_cas_params
 	rc=$?
 	[ "$rc" -eq 2 ] && return 0
@@ -547,26 +493,18 @@ cmd_params() {
 }
 
 cmd_login() {
-	local age rc
-	# Reuse the params captured by `params` when they are still fresh, so the
-	# panel flow (fetch -> login) uses exactly the values that were displayed
-	# and persisted. Refetch only when none exist or they look stale.
+	local rc
+	# Params are captured once by `params` and then reused for every login.
+	# Only fetch when there are none saved yet; never refetch behind the user's
+	# back. Refreshing params is an explicit action (the params button).
 	if [ -z "$CAS_EXECUTION" ]; then
 		if load_persisted_params; then
-			age=$(params_age)
-			if [ "${age:-999999}" -le "$CAS_PARAMS_MAX_AGE" ] 2>/dev/null; then
-				cas_log "reusing persisted params (age ${age}s)"
-			else
-				cas_log "persisted params are ${age}s old; refetching"
-				fetch_cas_params
-				rc=$?
-				# rc=2: already logged in server-side, nothing left to do.
-				[ "$rc" -eq 2 ] && return 0
-				[ "$rc" -eq 0 ] || return 1
-			fi
+			cas_log "using saved params (captured ${CAS_PARAMS_TIME:-unknown})"
 		else
+			cas_log "no saved params; fetching once"
 			fetch_cas_params
 			rc=$?
+			# rc=2: already logged in server-side, nothing left to do.
 			[ "$rc" -eq 2 ] && return 0
 			[ "$rc" -eq 0 ] || return 1
 		fi
@@ -590,8 +528,10 @@ cmd_body() {
 }
 
 cmd_status() {
-	local state_file="$COOKIE_DIR/cas_state.env" session
+	local state_file="$COOKIE_DIR/cas_state.env"
 
+	# Purely local: read the persisted params and the local cookie. No network
+	# access, so refreshing the status never refetches params or the request.
 	printf 'login_url=%s\n' "$HSCAS_LOGIN_URL"
 
 	if load_persisted_params; then
@@ -601,8 +541,8 @@ cmd_status() {
 		printf 'params_eventId=%s\n' "${CAS_EVENT_ID:-}"
 		printf 'params_execution=%s\n' "${CAS_EXECUTION:-}"
 		printf 'params_saved=%s\n' "$CAS_PARAMS_FILE"
-		# Include the assembled request so the panel can show it inline
-		# without a separate round-trip.
+		# Rebuild the request from the SAVED params (no refetch) so the request
+		# display stays put across status refreshes.
 		printf '\n---request---\n'
 		cmd_request_inner 2>&1 || true
 		printf '%s\n' '---end-request---'
@@ -610,15 +550,13 @@ cmd_status() {
 		printf 'params=none\n'
 	fi
 
+	# Login state from the local cookie only.
 	if cas_cookie_valid; then
 		printf 'cookie=valid\n'
 		printf 'session=active\n'
 	else
-		# No usable local cookie. Ask the server before declaring anything, so
-		# we never show "cookie invalid" while a session is actually active.
-		session=$(cas_server_session_state)
 		printf 'cookie=absent\n'
-		printf 'session=%s\n' "$session"
+		printf 'session=inactive\n'
 	fi
 	cas_cookie_summary
 
@@ -637,12 +575,16 @@ cmd_ensure() {
 	fi
 
 	cas_log "cookie missing or expired; re-authenticating"
-	# Refresh the server-issued params, then log in with them. rc=2 means the
+	# Reuse the saved params; only capture them when none exist. rc=2 means the
 	# CAS server already considers the client logged in (session active).
-	fetch_cas_params
-	rc=$?
-	[ "$rc" -eq 2 ] && return 0
-	[ "$rc" -eq 0 ] || return 1
+	if [ -z "$CAS_EXECUTION" ]; then
+		if ! load_persisted_params; then
+			fetch_cas_params
+			rc=$?
+			[ "$rc" -eq 2 ] && return 0
+			[ "$rc" -eq 0 ] || return 1
+		fi
+	fi
 	perform_cas_login
 }
 

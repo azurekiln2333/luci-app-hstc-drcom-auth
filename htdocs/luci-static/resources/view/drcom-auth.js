@@ -409,15 +409,6 @@ return view.extend({
 			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).then(function(res) {
 				var raw = (res && res.stdout ? res.stdout : '').trim();
 
-				// Split off the inline request block, if present.
-				var requestPart = '';
-				var marker = raw.indexOf('\n---request---\n');
-				if (marker >= 0) {
-					requestPart = raw.slice(marker + '\n---request---\n'.length)
-						.replace(/---end-request---[\s\S]*$/, '').trim();
-					raw = raw.slice(0, marker);
-				}
-
 				var values = {};
 				raw.split('\n').forEach(function(line) {
 					var eq = line.indexOf('=');
@@ -439,8 +430,6 @@ return view.extend({
 
 				var cookieNode = document.getElementById('drcom-cas-cookie-status');
 				if (cookieNode) {
-					// Use the single coherent session state so the panel can never
-					// claim "invalid" while the server still holds a session.
 					var state = values.session || 'unknown';
 					if (state === 'active')
 						cookieNode.textContent = values.cookie === 'valid'
@@ -452,12 +441,26 @@ return view.extend({
 						cookieNode.textContent = tr('casCookieUnknown');
 				}
 
-				// Show the assembled request inline (no button needed).
-				if (requestPart)
-					renderCasRequest(requestPart);
-
+				// NOTE: the request is intentionally NOT rendered here. Status
+				// refreshes must not rebuild the request display; only the params
+				// button (explicit refresh) and the initial page load do that.
 				return values;
 			}).catch(function() { return {}; });
+		};
+
+		// Render the request once, from the currently saved params. Used on page
+		// load and after an explicit params fetch; never on status refreshes.
+		var loadCasRequest = function() {
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).then(function(res) {
+				var raw = (res && res.stdout ? res.stdout : '').trim();
+				var marker = raw.indexOf('\n---request---\n');
+				if (marker < 0)
+					return;
+				var requestPart = raw.slice(marker + '\n---request---\n'.length)
+					.replace(/---end-request---[\s\S]*$/, '').trim();
+				if (requestPart)
+					renderCasRequest(requestPart);
+			}).catch(function() {});
 		};
 
 		m = new form.Map('drcom_auth', tr('title'), tr('desc'));
@@ -622,8 +625,12 @@ return view.extend({
 					showDiag(tr('casParamsFailed'), output || execMessage(res));
 					return;
 				}
-				// Reflect the freshly captured params and request inline.
-				return refreshCasStatus();
+				// Reflect the freshly captured params, then rebuild the request from
+				// them. This is the ONLY place the request display is refreshed
+				// (besides initial load); status refreshes never touch it.
+				return refreshCasStatus().then(function() {
+					return loadCasRequest();
+				});
 			}).catch(function(e) {
 				var node = document.getElementById('drcom-cas-params-status');
 				if (node)
@@ -774,8 +781,9 @@ return view.extend({
 					window.location.reload();
 				});
 			}
-			// Populate the CAS params/cookie status rows from the backend.
+			// Populate the CAS status rows, then render the saved request once.
 			refreshCasStatus();
+			loadCasRequest();
 			return viewNode;
 		});
 	}
