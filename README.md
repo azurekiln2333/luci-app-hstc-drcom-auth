@@ -127,6 +127,7 @@ opkg install luci-app-drcom-auth_1.0.0-1_all.ipk
 ```sh
 # 独立 CAS 认证
 /etc/init.d/drcom_auth cas_params     # 抓取并保存 CAS 登录参数
+/etc/init.d/drcom_auth cas_body       # 查看拼接好的 POST 请求体（含加密密码，URL 编码）
 /etc/init.d/drcom_auth cas_login      # 执行独立 CAS 登录并持久化 Cookie
 /etc/init.d/drcom_auth cas_status     # 查看参数 / Cookie 状态
 /etc/init.d/drcom_auth cas_ensure     # Cookie 失效时才重新登录
@@ -139,6 +140,16 @@ opkg install luci-app-drcom-auth_1.0.0-1_all.ipk
 
 tail -n 100 /usr/share/drcom-auth/logs/drcom_status_log.txt
 ```
+
+面板「CAS 认证」板块的「查看/复制请求体」按钮会调用 `cas_body`，展示：
+
+- 加密后密码（`__RSA__<base64>`，可复制）
+- 密码前缀 / 长度
+- 字段顺序：`username password currentMenu failN execution _eventId geolocation submit`
+- 完整 URL 编码后的请求体（可复制）
+
+提交时使用 `--data-raw` 发送上述拼接好的 body，因此**面板展示的内容与
+实际发出的请求字节一致**。
 
 持久化文件位于 `/usr/share/drcom-auth/info/`（权限 600）：
 

@@ -75,6 +75,19 @@ return view.extend({
 				casRefresh: 'Cookie 状态',
 				refreshCasStatus: '刷新状态',
 				authDesc: '使用 Dr.COM 网页授权链接完成完整认证（需先获取授权链接）。',
+				casBody: 'CAS 请求体',
+				showCasBody: '查看/复制请求体',
+				casBodyLoading: '生成中...',
+				casBodyFailed: '生成请求体失败',
+				casEncryptedPassword: '加密后密码',
+				casPasswordPrefix: '密码前缀',
+				casPasswordLength: '密码长度',
+				casFieldOrder: '字段顺序',
+				casUrlencoded: 'URL 编码',
+				casRequestBody: '完整请求体',
+				casCopy: '复制',
+				casCopied: '已复制到剪贴板',
+				casCopyFailed: '复制失败，请手动选择复制',
 				wanPort: 'WAN 接口',
 				deviceType: '设备类型',
 				pc: '电脑',
@@ -143,6 +156,19 @@ return view.extend({
 				casRefresh: 'Cookie 狀態',
 				refreshCasStatus: '重新整理狀態',
 				authDesc: '使用 Dr.COM 網頁授權連結完成完整認證（需先取得授權連結）。',
+				casBody: 'CAS 請求體',
+				showCasBody: '檢視/複製請求體',
+				casBodyLoading: '產生中...',
+				casBodyFailed: '產生請求體失敗',
+				casEncryptedPassword: '加密後密碼',
+				casPasswordPrefix: '密碼前綴',
+				casPasswordLength: '密碼長度',
+				casFieldOrder: '欄位順序',
+				casUrlencoded: 'URL 編碼',
+				casRequestBody: '完整請求體',
+				casCopy: '複製',
+				casCopied: '已複製到剪貼簿',
+				casCopyFailed: '複製失敗，請手動選取複製',
 				wanPort: 'WAN 介面',
 				deviceType: '裝置類型',
 				pc: '電腦',
@@ -211,6 +237,19 @@ return view.extend({
 				casRefresh: 'Cookie Status',
 				refreshCasStatus: 'Refresh Status',
 				authDesc: 'Complete the full Dr.COM flow using the web authorize URL (fetch it first).',
+				casBody: 'CAS Request Body',
+				showCasBody: 'Show / Copy Request Body',
+				casBodyLoading: 'Generating...',
+				casBodyFailed: 'Failed to build request body',
+				casEncryptedPassword: 'Encrypted Password',
+				casPasswordPrefix: 'Password Prefix',
+				casPasswordLength: 'Password Length',
+				casFieldOrder: 'Field Order',
+				casUrlencoded: 'URL Encoded',
+				casRequestBody: 'Full Request Body',
+				casCopy: 'Copy',
+				casCopied: 'Copied to clipboard',
+				casCopyFailed: 'Copy failed, select and copy manually',
 				wanPort: 'WAN Interface',
 				deviceType: 'Device Type',
 				pc: 'PC',
@@ -302,6 +341,73 @@ return view.extend({
 				values._eventId || '?',
 				shortExec);
 		};
+		// Render the `cas_body` key=value output: a copyable encrypted password
+		// row and the full url-encoded request body.
+		var renderCasBody = function(raw) {
+			var box = document.getElementById('drcom-cas-body-box');
+			if (!box)
+				return;
+			var values = {};
+			String(raw || '').split('\n').forEach(function(line) {
+				var eq = line.indexOf('=');
+				if (eq > 0)
+					values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+			});
+			box.innerHTML = '';
+			box.appendChild(casFieldRow(tr('casEncryptedPassword'), values.encrypted_password || ''));
+			box.appendChild(casFieldRow(tr('casPasswordPrefix'), values.password_prefix || ''));
+			box.appendChild(casFieldRow(tr('casPasswordLength'), values.password_length || ''));
+			box.appendChild(casFieldRow(tr('casFieldOrder'), values.field_order || ''));
+			box.appendChild(casFieldRow(tr('casUrlencoded'), values.urlencoded || ''));
+			box.appendChild(casFieldRow(tr('casRequestBody'), values.body || ''));
+			box.style.display = '';
+		};
+
+		// One label + read-only textarea + copy button.
+		var casFieldRow = function(label, value) {
+			var area = E('textarea', {
+				'class': 'drcom-body-field',
+				'readonly': 'readonly',
+				'rows': String(Math.min(6, Math.max(1, Math.ceil(String(value).length / 60) || 1)))
+			}, [ String(value) ]);
+			var button = E('button', {
+				'class': 'cbi-button cbi-button-action',
+				'click': function(ev) {
+					ev.preventDefault();
+					copyToClipboard(String(value)).then(function(ok) {
+						ui.addNotification(null, E('p', ok ? tr('casCopied') : tr('casCopyFailed')), ok ? undefined : 'error');
+					});
+				}
+			}, [ tr('casCopy') ]);
+			return E('div', { 'class': 'drcom-body-row' }, [
+				E('div', { 'class': 'drcom-body-label' }, [ label ]),
+				E('div', { 'class': 'drcom-body-value' }, [ area ]),
+				button
+			]);
+		};
+
+		// Clipboard with a fallback to selecting the text.
+		var copyToClipboard = function(text) {
+			if (navigator.clipboard && navigator.clipboard.writeText)
+				return navigator.clipboard.writeText(text).then(function() { return true; }).catch(function() { return legacyCopy(text); });
+			return Promise.resolve(legacyCopy(text));
+		};
+		var legacyCopy = function(text) {
+			try {
+				var ta = document.createElement('textarea');
+				ta.value = text;
+				ta.style.position = 'fixed';
+				ta.style.opacity = '0';
+				document.body.appendChild(ta);
+				ta.select();
+				var ok = document.execCommand('copy');
+				document.body.removeChild(ta);
+				return ok;
+			} catch (e) {
+				return false;
+			}
+		};
+
 		// Query the backend for current CAS params/cookie state and update the
 		// status rows. Kept as a closure so both load() and the buttons use it.
 		var refreshCasStatus = function() {
@@ -349,7 +455,13 @@ return view.extend({
 			'.drcom-auth-view .cbi-value-field > *:last-child{margin-bottom:0!important}',
 			'.drcom-auth-view .cbi-value-description{clear:both;margin-top:2px;margin-bottom:0}',
 			'.drcom-auth-view .cbi-button{margin-bottom:3px}',
-			'.drcom-auth-view .drcom-result{word-break:break-all;white-space:normal}'
+			'.drcom-auth-view .drcom-result{word-break:break-all;white-space:normal}',
+			'.drcom-body-box{margin-top:8px}',
+			'.drcom-body-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:6px}',
+			'.drcom-body-label{flex:0 0 150px;font-weight:600;padding-top:6px}',
+			'.drcom-body-value{flex:1 1 auto;min-width:0}',
+			'.drcom-body-field{width:100%;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;resize:vertical}',
+			'.drcom-body-row .cbi-button{flex:0 0 auto}'
 		].join('\n'));
 
 		s = m.section(form.TypedSection, 'drcom_auth', tr('basic'));
@@ -496,6 +608,42 @@ return view.extend({
 		o.rawhtml = true;
 		o.cfgvalue = function() {
 			return '<span id="drcom-cas-params-status" class="drcom-result">' + tr('casParamsIdle') + '</span>';
+		};
+
+		// Show the assembled, url-encoded POST body (encrypted password +
+		// session params) so it can be inspected and copied.
+		o = s.option(form.Button, '_cas_body', tr('casBody'));
+		o.inputtitle = tr('showCasBody');
+		o.inputstyle = 'apply';
+		o.onclick = function() {
+			var box = document.getElementById('drcom-cas-body-box');
+			var status = document.getElementById('drcom-cas-body-status');
+			if (status)
+				status.textContent = tr('casBodyLoading');
+			if (box)
+				box.style.display = 'none';
+
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_body' ]).then(function(res) {
+				var output = (res && res.stdout ? res.stdout : '').trim();
+				if (execFailed(res, execMessage(res)) || !output) {
+					if (status)
+						status.textContent = tr('casBodyFailed') + ': ' + (execMessage(res) || '');
+					return;
+				}
+				if (status)
+					status.textContent = '';
+				renderCasBody(output);
+			}).catch(function(e) {
+				if (status)
+					status.textContent = tr('casBodyFailed') + ': ' + (execMessage(e) || '');
+			});
+		};
+
+		o = s.option(form.DummyValue, '_cas_body_status', '');
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-cas-body-status" class="drcom-result"></span>' +
+				'<div id="drcom-cas-body-box" class="drcom-body-box" style="display:none"></div>';
 		};
 
 		// --- standalone CAS: perform login and persist cookies ---

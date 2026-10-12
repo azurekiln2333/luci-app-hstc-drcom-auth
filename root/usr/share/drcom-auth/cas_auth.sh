@@ -182,25 +182,75 @@ rsa_encrypt_password() {
 	return 1
 }
 
-perform_cas_login() {
-	local encrypted http_code location success_marker
+# Percent-encode a value for application/x-www-form-urlencoded bodies, matching
+# curl --data-urlencode semantics (space -> +, unreserved bytes kept as-is).
+# Byte-oriented so UTF-8 input is encoded per byte. Avoids gawk-only helpers
+# (strtonum) so it also runs under BusyBox awk on OpenWrt.
+cas_urlencode() {
+	printf '%s' "$1" | od -An -v -tx1 | awk -v HEX="0123456789ABCDEF" '
+		{
+			for (i = 1; i <= NF; i++) {
+				h = toupper($i)
+				# Unreserved: 0-9 A-Z a-z - . _ ~  (space becomes +)
+				if (h == "20")
+					printf "+"
+				else if (h ~ /^3[0-9]$/ || h ~ /^4[1-9A-F]$/ || h ~ /^5[0-9A]$/ ||
+				         h ~ /^6[1-9A-F]$/ || h ~ /^7[0-9A]$/ ||
+				         h == "2D" || h == "2E" || h == "5F" || h == "7E")
+					printf "%c", index(HEX, substr(h,1,1)) * 16 + index(HEX, substr(h,2,1)) - 17
+				else
+					printf "%%%s", h
+			}
+		}
+	'
+}
 
-	[ -n "$CAS_EXECUTION" ] || { cas_log "no params loaded; call fetch_cas_params first"; return 1; }
+# Build the exact POST body that perform_cas_login() sends. Stored in
+# CAS_POST_BODY_STRING and also printed. Field order mirrors the historical
+# LOGIN_POSTBODY:
+#   username password currentMenu failN execution _eventId geolocation submit
+cas_build_body() {
+	local encrypted u pw
+
+	[ -n "$CAS_EXECUTION" ] || { cas_log "no params loaded; fetch params first"; return 1; }
 
 	encrypted=$(rsa_encrypt_password) || return 1
+
+	pw=$(cas_urlencode "$encrypted")
+	u=$(cas_urlencode "$USERNAME")
+	CAS_ENCRYPTED_PASSWORD="$encrypted"
+	CAS_POST_BODY_STRING="username=${u}&password=${pw}&currentMenu=$(cas_urlencode "$CAS_CURRENT_MENU")&failN=$(cas_urlencode "$CAS_FAIL_N")&execution=$(cas_urlencode "$CAS_EXECUTION")&_eventId=$(cas_urlencode "$CAS_EVENT_ID")&geolocation=$(cas_urlencode "$CAS_GEOLOCATION")&submit=$(cas_urlencode "登录")"
+	return 0
+}
+
+# Report the assembled request in a copy-pasteable, machine-readable form.
+cmd_body_inner() {
+	cas_build_body || return 1
+
+	printf 'login_url=%s\n' "$HSCAS_LOGIN_URL"
+	printf 'method=POST\n'
+	printf 'content_type=application/x-www-form-urlencoded\n'
+	printf 'urlencoded=yes\n'
+	printf 'field_order=username password currentMenu failN execution _eventId geolocation submit\n'
+	printf 'encrypted_password=%s\n' "$CAS_ENCRYPTED_PASSWORD"
+	printf 'password_prefix=%s\n' "$(printf '%s' "$CAS_ENCRYPTED_PASSWORD" | cut -c1-7)"
+	printf 'password_length=%s\n' "${#CAS_ENCRYPTED_PASSWORD}"
+	printf 'body=%s\n' "$CAS_POST_BODY_STRING"
+}
+
+perform_cas_login() {
+	local http_code success_marker
+
+	# Build the body once so the value shown by `cas_auth.sh body` is exactly
+	# what gets submitted.
+	cas_build_body || return 1
 
 	cas_log "POST $HSCAS_LOGIN_URL (no service parameter)"
 	http_code=$(curl -c "$CAS_COOKIE_FILE" -b "$CAS_COOKIE_FILE" \
 		-H "User-Agent: $USER_AGENT" -X POST -s -D "$CAS_HEADERS" -o "$CAS_POST_BODY" \
+		-H "Content-Type: application/x-www-form-urlencoded" \
+		--data-raw "$CAS_POST_BODY_STRING" \
 		-w "%{http_code}" \
-		--data-urlencode "username=$USERNAME" \
-		--data-urlencode "password=$encrypted" \
-		--data-urlencode "currentMenu=$CAS_CURRENT_MENU" \
-		--data-urlencode "failN=$CAS_FAIL_N" \
-		--data-urlencode "execution=$CAS_EXECUTION" \
-		--data-urlencode "_eventId=$CAS_EVENT_ID" \
-		--data-urlencode "geolocation=$CAS_GEOLOCATION" \
-		--data-urlencode "submit=登录" \
 		"$HSCAS_LOGIN_URL")
 
 	success_marker=false
@@ -286,6 +336,14 @@ cmd_login() {
 	perform_cas_login
 }
 
+# Load persisted params if needed, then assemble and print the request body.
+cmd_body() {
+	if [ -z "$CAS_EXECUTION" ]; then
+		load_persisted_params || fetch_cas_params || return 1
+	fi
+	cmd_body_inner
+}
+
 cmd_status() {
 	local state_file="$COOKIE_DIR/cas_state.env"
 
@@ -331,11 +389,12 @@ cmd_ensure() {
 CMD="${1:-status}"
 case "$CMD" in
 	params) cmd_params ;;
+	body) cmd_body ;;
 	login) cmd_login ;;
 	status) cmd_status ;;
 	ensure) cmd_ensure ;;
 	*)
-		echo "usage: $0 {params|login|status|ensure}" >&2
+		echo "usage: $0 {params|body|login|status|ensure}" >&2
 		exit 2
 		;;
 esac

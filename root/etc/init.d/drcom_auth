@@ -8,11 +8,12 @@
 START=95
 STOP=10
 USE_PROCD=1
-EXTRA_COMMANDS="authorize ticket login cas_params cas_login cas_status cas_ensure public_key public_key_status"
+EXTRA_COMMANDS="authorize ticket login cas_params cas_body cas_login cas_status cas_ensure public_key public_key_status"
 EXTRA_HELP="	authorize		Get the Dr.COM authorize URL only
 	ticket			Run the full Dr.COM login flow now
 	login			Alias of ticket
 	cas_params		Fetch and save the standalone CAS login parameters
+	cas_body		Show the assembled CAS login POST body (url-encoded)
 	cas_login		Perform a standalone CAS login (no Dr.COM)
 	cas_status		Show saved CAS parameters and cookie status
 	cas_ensure		CAS login only when the stored cookie is missing/expired
@@ -108,6 +109,13 @@ login() {
 cas_params() {
 	write_config
 	/bin/sh "$APP_DIR/cas_auth.sh" params
+}
+
+# Show the assembled CAS login POST body (password already RSA encrypted and
+# every field url-encoded), for inspection and copy-paste.
+cas_body() {
+	write_config
+	/bin/sh "$APP_DIR/cas_auth.sh" body
 }
 
 # Perform a standalone CAS login and persist cookies under /usr/share/drcom-auth/info.
