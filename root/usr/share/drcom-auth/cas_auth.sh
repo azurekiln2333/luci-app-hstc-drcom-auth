@@ -481,44 +481,62 @@ cas_cookie_valid() {
 }
 
 # --- Dr.COM portal status ---------------------------------------------------
-# Query the portal root and read the Dr.COMWebLoginID_N marker:
-#   1 = not logged in (login page), 2 = login failed, 3 = online
-# Also extracts uid / v4ip / stime when present. Echoes key=value lines.
+# The portal serves the same page template regardless of session state, and its
+# `etime` is a billing-period end rather than a session timeout, so neither the
+# Dr.COMWebLoginID marker nor etime can tell whether we are really online. The
+# reliable test is whether the network actually lets us through: fetch a
+# connectivity-check URL and treat HTTP 204/200 as online. The portal page is
+# still consulted for the account / IP / session start.
 cmd_portal_status() {
-	local http_code page body marker uid ip stime state rc
+	local http_code page body uid ip stime etime now etime_s state rc probe_code
 
+	# 1) Real connectivity test.
+	probe_code=$(curl --connect-timeout 5 --max-time 8 -s -o /dev/null -w '%{http_code}' \
+		http://connect.rom.miui.com/generate_204 2>/dev/null) || probe_code=000
+
+	# 2) Portal page for the session details.
 	page=$(mktemp)
 	rc=0
 	http_code=$(curl --connect-timeout "$CAS_CONNECT_TIMEOUT" --max-time "$CAS_MAX_TIME" \
 		-s -o "$page" -w "%{http_code}" "$DRCOM_PORTAL_URL" 2>/dev/null) || rc=$?
-
-	if [ "$rc" -ne 0 ] || [ "$http_code" != "200" ]; then
-		printf 'portal=unknown\n'
-		printf 'portal_http=%s\n' "${http_code:-none}"
-		rm -f "$page"
-		return 0
+	if [ "$rc" -eq 0 ] && [ "$http_code" = "200" ]; then
+		body=$(cat "$page" 2>/dev/null)
+	else
+		body=""
 	fi
-
-	body=$(cat "$page" 2>/dev/null)
 	rm -f "$page"
 
-	marker=$(printf '%s' "$body" | grep -o 'Dr\.COMWebLoginID_[0-9]*\.htm' | head -n 1 | grep -o '[0-9]')
-	uid=$(printf '%s' "$body" | sed -n "s/.*uid='\([^']*\)'.*/\1/p" | head -n 1)
-	ip=$(printf '%s' "$body" | sed -n "s/.*v4ip='\([^']*\)'.*/\1/p" | head -n 1)
-	stime=$(printf '%s' "$body" | sed -n "s/.*stime='\([^']*\)'.*/\1/p" | head -n 1)
+	if [ -n "$body" ]; then
+		uid=$(printf '%s' "$body" | sed -n "s/.*uid='\([^']*\)'.*/\1/p" | head -n 1)
+		ip=$(printf '%s' "$body" | sed -n "s/.*v4ip='\([^']*\)'.*/\1/p" | head -n 1)
+		stime=$(printf '%s' "$body" | sed -n "s/.*stime='\([^']*\)'.*/\1/p" | head -n 1)
+		etime=$(printf '%s' "$body" | sed -n "s/.*etime='\([^']*\)'.*/\1/p" | head -n 1)
+	else
+		uid=""; ip=""; stime=""; etime=""
+	fi
 
-	case "$marker" in
-		3) state=online ;;
-		2) state=failed ;;
-		1) state=offline ;;
-		*) state=unknown ;;
+	# Online when the connectivity check passes (204/200) or the portal itself
+	# answered and reports an active account with a future billing end.
+	case "$probe_code" in
+		204|200) state=online ;;
+		*)
+			state=offline
+			if [ -n "$uid" ] && [ -n "$stime" ]; then
+				now=$(date '+%s' 2>/dev/null || echo 0)
+				etime_s=$(date -d "$etime" '+%s' 2>/dev/null || echo 0)
+				if [ "$etime_s" -gt 0 ] 2>/dev/null && [ "$etime_s" -gt "$now" ]; then
+					state=online
+				fi
+			fi
+			;;
 	esac
 
 	printf 'portal=%s\n' "$state"
-	printf 'portal_marker=%s\n' "${marker:-0}"
+	printf 'portal_probe=%s\n' "$probe_code"
 	printf 'portal_uid=%s\n' "$uid"
 	printf 'portal_ip=%s\n' "$ip"
 	printf 'portal_since=%s\n' "$stime"
+	printf 'portal_until=%s\n' "$etime"
 	return 0
 }
 

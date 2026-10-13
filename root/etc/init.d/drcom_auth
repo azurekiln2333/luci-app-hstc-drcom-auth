@@ -202,7 +202,8 @@ cas_logout() {
 	/bin/sh "$APP_DIR/cas_auth.sh" logout
 }
 
-# --- account management -----------------------------------------------------# List accounts as one line each: <id><TAB><username><TAB><active|-> 
+# --- account management -----------------------------------------------------
+# List accounts as one line each: <id><TAB><username><TAB><active|-> 
 accounts_list() {
 	local active ids id user
 
@@ -298,7 +299,7 @@ overview() {
 		net=down
 	fi
 
-	# Real Dr.COM state: query the portal itself.
+	# Real Dr.COM state: the portal's own connectivity probe.
 	portal_out=$(/bin/sh "$APP_DIR/cas_auth.sh" portal_status 2>/dev/null)
 	portal=$(printf '%s\n' "$portal_out" | sed -n 's/^portal=//p')
 	portal_uid=$(printf '%s\n' "$portal_out" | sed -n 's/^portal_uid=//p')

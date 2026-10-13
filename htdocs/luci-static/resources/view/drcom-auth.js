@@ -756,8 +756,6 @@ return view.extend({
 						drcomNode.textContent = account ? format(tr('statusDrcomOnlineAcct'), account[1]) : tr('statusDrcomOnline');
 					else if (ds === 'offline')
 						drcomNode.textContent = tr('statusDrcomOffline');
-					else if (ds === 'failed')
-						drcomNode.textContent = tr('statusDrcomFail');
 					else
 						drcomNode.textContent = tr('statusUnknown');
 				}
