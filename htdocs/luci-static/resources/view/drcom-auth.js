@@ -234,6 +234,7 @@ return view.extend({
 				casHeaders: '请求头',
 				casRequestBody: '完整请求体',
 				casResponse: '响应内容',
+				casResponsePreview: '响应渲染预览',
 				casRequestLine: '请求行',
 				casCopy: '复制',
 				casCopied: '已复制到剪贴板',
@@ -362,6 +363,7 @@ return view.extend({
 				casHeaders: '請求標頭',
 				casRequestBody: '完整請求體',
 				casResponse: '回應內容',
+				casResponsePreview: '回應渲染預覽',
 				casRequestLine: '請求行',
 				casCopy: '複製',
 				casCopied: '已複製到剪貼簿',
@@ -490,6 +492,7 @@ return view.extend({
 				casHeaders: 'Request Headers',
 				casRequestBody: 'Full Request Body',
 				casResponse: 'Response',
+				casResponsePreview: 'Response Preview',
 				casRequestLine: 'Request Line',
 				casCopy: 'Copy',
 				casCopied: 'Copied to clipboard',
@@ -618,8 +621,9 @@ return view.extend({
 			box.style.display = '';
 		};
 
-		// Render the last CAS login response body in a read-only code block
-		// under the request. Nothing is shown when there is no response.
+		// Render the last CAS login response body: the source in a copyable code
+		// block and a sandboxed preview of the HTML page. Nothing is shown when
+		// there is no response.
 		var renderCasResponse = function(raw) {
 			var box = document.getElementById('drcom-cas-response-box');
 			if (!box)
@@ -632,6 +636,18 @@ return view.extend({
 			}
 			box.innerHTML = '';
 			box.appendChild(casFieldRow(tr('casResponse'), text));
+
+			// Sandboxed preview: scripts off, no same-origin, so the response page
+			// cannot touch the LuCI page. srcdoc keeps it self-contained.
+			var frame = E('iframe', {
+				'class': 'drcom-preview-frame',
+				'sandbox': '',
+				'srcdoc': text
+			});
+			box.appendChild(E('div', { 'class': 'drcom-body-row' }, [
+				E('div', { 'class': 'drcom-body-label' }, [ tr('casResponsePreview') ]),
+				E('div', { 'class': 'drcom-body-value' }, [ frame ])
+			]));
 			box.style.display = '';
 		};
 
@@ -879,7 +895,9 @@ return view.extend({
 			'.drcom-acc-id{opacity:.6;font-size:12px}',
 			'.drcom-acc-row .cbi-button{margin-left:auto}',
 			'.drcom-acc-add{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px}',
-			'.drcom-acc-add .drcom-body-label{flex:0 0 100%;padding:0}'
+			'.drcom-acc-add .drcom-body-label{flex:0 0 100%;padding:0}',
+			'.drcom-preview-frame{width:100%;height:320px;border:1px solid rgba(128,128,128,.4);border-radius:4px;background:#fff}',
+			'.drcom-body-row .drcom-body-value{flex:1 1 auto;min-width:0}'
 		].join('\n'));
 
 		// Status card (first card on the Online Auth tab).
