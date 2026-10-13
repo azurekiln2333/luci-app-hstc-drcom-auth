@@ -62,6 +62,12 @@ CAS_PARAMS_MAX_AGE="${CAS_PARAMS_MAX_AGE:-120}"
 
 HSCAS_URL="${HSCAS_URL:-https://hscas.hstc.edu.cn}"
 
+# Dr.COM portal (status queries only; auth still goes through CAS).
+DRCOM_SERVER_IP="${DRCOM_SERVER_IP:-192.168.2.34}"
+DRCOM_PORTAL_URL="http://$DRCOM_SERVER_IP/"
+# Where the last CAS login response body is kept for display.
+CAS_LAST_RESPONSE="${CAS_LAST_RESPONSE:-$COOKIE_DIR/cas_last_response.txt}"
+
 # Normalize HSCAS_URL so both spellings work and the user never ends up with a
 # doubled path like /cas/login/cas/login. Accepted inputs:
 #   https://hscas.hstc.edu.cn
@@ -401,6 +407,9 @@ perform_cas_login() {
 		success_marker=true
 	fi
 
+	# Keep the response body for display in the panel.
+	save_cas_response
+
 	if [ "$http_code" = "302" ] || [ "$success_marker" = "true" ]; then
 		cas_log "CAS login OK (HTTP $http_code)"
 		CAS_LOGIN_TIME=$(date '+%Y-%m-%d %H:%M:%S')
@@ -421,9 +430,16 @@ perform_cas_login() {
 	return 3
 }
 
+# Copy the raw response body aside so the panel can display it later. Capped
+# so a huge page never fills the filesystem.
+save_cas_response() {
+	[ -f "$CAS_POST_BODY" ] || return 0
+	head -c 65536 "$CAS_POST_BODY" > "$CAS_LAST_RESPONSE" 2>/dev/null || true
+	chmod 600 "$CAS_LAST_RESPONSE" 2>/dev/null || true
+}
+
 # Record the last login outcome alongside the cookie jar.
-persist_cas_state() {
-	local when="$1" result="$2" code="$3"
+persist_cas_state() {	local when="$1" result="$2" code="$3"
 	mkdir -p "$COOKIE_DIR"
 	{
 		echo "CAS_LOGIN_TIME=\"$when\""
@@ -462,6 +478,56 @@ cas_cookie_valid() {
 	tgc=$(cas_cookie_tgc) || return 1
 	[ -n "$tgc" ] || return 1
 	return 0
+}
+
+# --- Dr.COM portal status ---------------------------------------------------
+# Query the portal root and read the Dr.COMWebLoginID_N marker:
+#   1 = not logged in (login page), 2 = login failed, 3 = online
+# Also extracts uid / v4ip / stime when present. Echoes key=value lines.
+cmd_portal_status() {
+	local http_code page body marker uid ip stime state rc
+
+	page=$(mktemp)
+	rc=0
+	http_code=$(curl --connect-timeout "$CAS_CONNECT_TIMEOUT" --max-time "$CAS_MAX_TIME" \
+		-s -o "$page" -w "%{http_code}" "$DRCOM_PORTAL_URL" 2>/dev/null) || rc=$?
+
+	if [ "$rc" -ne 0 ] || [ "$http_code" != "200" ]; then
+		printf 'portal=unknown\n'
+		printf 'portal_http=%s\n' "${http_code:-none}"
+		rm -f "$page"
+		return 0
+	fi
+
+	body=$(cat "$page" 2>/dev/null)
+	rm -f "$page"
+
+	marker=$(printf '%s' "$body" | grep -o 'Dr\.COMWebLoginID_[0-9]*\.htm' | head -n 1 | grep -o '[0-9]')
+	uid=$(printf '%s' "$body" | sed -n "s/.*uid='\([^']*\)'.*/\1/p" | head -n 1)
+	ip=$(printf '%s' "$body" | sed -n "s/.*v4ip='\([^']*\)'.*/\1/p" | head -n 1)
+	stime=$(printf '%s' "$body" | sed -n "s/.*stime='\([^']*\)'.*/\1/p" | head -n 1)
+
+	case "$marker" in
+		3) state=online ;;
+		2) state=failed ;;
+		1) state=offline ;;
+		*) state=unknown ;;
+	esac
+
+	printf 'portal=%s\n' "$state"
+	printf 'portal_marker=%s\n' "${marker:-0}"
+	printf 'portal_uid=%s\n' "$uid"
+	printf 'portal_ip=%s\n' "$ip"
+	printf 'portal_since=%s\n' "$stime"
+	return 0
+}
+
+# Echo the last CAS login response body, capped to a sane size for the UI.
+cmd_last_response() {
+	if [ ! -s "$CAS_LAST_RESPONSE" ]; then
+		return 0
+	fi
+	head -c 8192 "$CAS_LAST_RESPONSE" 2>/dev/null
 }
 
 # --- sub-commands -----------------------------------------------------------
@@ -565,6 +631,13 @@ cmd_status() {
 		printf 'last_login=%s\n' "${CAS_LOGIN_TIME:-unknown}"
 		printf 'last_result=%s\n' "${CAS_LOGIN_RESULT:-unknown}"
 	fi
+
+	# Last login response body, so the panel can show it under the request.
+	if [ -s "$CAS_LAST_RESPONSE" ]; then
+		printf '\n---response---\n'
+		cmd_last_response 2>/dev/null || true
+		printf '\n---end-response---\n'
+	fi
 }
 
 cmd_ensure() {
@@ -610,8 +683,10 @@ case "$CMD" in
 	status) cmd_status ;;
 	ensure) cmd_ensure ;;
 	logout) cmd_logout ;;
+	portal_status) cmd_portal_status ;;
+	last_response) cmd_last_response ;;
 	*)
-		echo "usage: $0 {params|body|request|login|status|ensure|logout}" >&2
+		echo "usage: $0 {params|body|request|login|status|ensure|logout|portal_status|last_response}" >&2
 		exit 2
 		;;
 esac

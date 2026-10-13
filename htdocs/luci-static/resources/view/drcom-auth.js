@@ -154,6 +154,9 @@ return view.extend({
 				statusNetworkUp: '已联网',
 				statusNetworkDown: '未联网',
 				statusDrcomOk: '已认证',
+				statusDrcomOnline: '已在线',
+				statusDrcomOnlineAcct: '已在线（%s）',
+				statusDrcomOffline: '未在线',
 				statusDrcomFail: '认证失败',
 				statusCasOk: '已登录',
 				statusCasNo: '未登录',
@@ -230,6 +233,7 @@ return view.extend({
 				casEncryptedPassword: '加密后密码',
 				casHeaders: '请求头',
 				casRequestBody: '完整请求体',
+				casResponse: '响应内容',
 				casRequestLine: '请求行',
 				casCopy: '复制',
 				casCopied: '已复制到剪贴板',
@@ -278,6 +282,9 @@ return view.extend({
 				statusNetworkUp: '已連網',
 				statusNetworkDown: '未連網',
 				statusDrcomOk: '已認證',
+				statusDrcomOnline: '已線上',
+				statusDrcomOnlineAcct: '已線上（%s）',
+				statusDrcomOffline: '未線上',
 				statusDrcomFail: '認證失敗',
 				statusCasOk: '已登入',
 				statusCasNo: '未登入',
@@ -354,6 +361,7 @@ return view.extend({
 				casEncryptedPassword: '加密後密碼',
 				casHeaders: '請求標頭',
 				casRequestBody: '完整請求體',
+				casResponse: '回應內容',
 				casRequestLine: '請求行',
 				casCopy: '複製',
 				casCopied: '已複製到剪貼簿',
@@ -402,6 +410,9 @@ return view.extend({
 				statusNetworkUp: 'Online',
 				statusNetworkDown: 'Offline',
 				statusDrcomOk: 'Authenticated',
+				statusDrcomOnline: 'Online',
+				statusDrcomOnlineAcct: 'Online (%s)',
+				statusDrcomOffline: 'Offline',
 				statusDrcomFail: 'Failed',
 				statusCasOk: 'Logged in',
 				statusCasNo: 'Not logged in',
@@ -478,6 +489,7 @@ return view.extend({
 				casEncryptedPassword: 'Encrypted Password',
 				casHeaders: 'Request Headers',
 				casRequestBody: 'Full Request Body',
+				casResponse: 'Response',
 				casRequestLine: 'Request Line',
 				casCopy: 'Copy',
 				casCopied: 'Copied to clipboard',
@@ -606,6 +618,23 @@ return view.extend({
 			box.style.display = '';
 		};
 
+		// Render the last CAS login response body in a read-only code block
+		// under the request. Nothing is shown when there is no response.
+		var renderCasResponse = function(raw) {
+			var box = document.getElementById('drcom-cas-response-box');
+			if (!box)
+				return;
+			var text = String(raw || '').trim();
+			if (!text) {
+				box.innerHTML = '';
+				box.style.display = 'none';
+				return;
+			}
+			box.innerHTML = '';
+			box.appendChild(casFieldRow(tr('casResponse'), text));
+			box.style.display = '';
+		};
+
 		// One label + read-only textarea + copy button.
 		var casFieldRow = function(label, value) {
 			var area = E('textarea', {
@@ -717,13 +746,17 @@ return view.extend({
 						netNode.textContent = tr('statusUnknown');
 				}
 
-				// Dr.COM auth status: last login result.
+				// Dr.COM auth status: real portal state (online/offline/failed).
 				var drcomNode = document.getElementById('drcom-status-drcom');
 				if (drcomNode) {
-					var mres = net.match(/drcom=(\w+)/);
-					if (mres && mres[1] === 'ok')
-						drcomNode.textContent = tr('statusDrcomOk');
-					else if (mres && mres[1] === 'rejected')
+					var mres = net.match(/drcom=(\w*)/);
+					var ds = mres ? mres[1] : '';
+					var account = net.match(/account=(\S+)/);
+					if (ds === 'online')
+						drcomNode.textContent = account ? format(tr('statusDrcomOnlineAcct'), account[1]) : tr('statusDrcomOnline');
+					else if (ds === 'offline')
+						drcomNode.textContent = tr('statusDrcomOffline');
+					else if (ds === 'failed')
 						drcomNode.textContent = tr('statusDrcomFail');
 					else
 						drcomNode.textContent = tr('statusUnknown');
@@ -753,12 +786,19 @@ return view.extend({
 			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).then(function(res) {
 				var raw = (res && res.stdout ? res.stdout : '').trim();
 				var marker = raw.indexOf('\n---request---\n');
-				if (marker < 0)
-					return;
-				var requestPart = raw.slice(marker + '\n---request---\n'.length)
-					.replace(/---end-request---[\s\S]*$/, '').trim();
-				if (requestPart)
-					renderCasRequest(requestPart);
+				if (marker >= 0) {
+					var rest = raw.slice(marker + '\n---request---\n'.length);
+					var requestPart = rest.replace(/---end-request---[\s\S]*$/, '').trim();
+					if (requestPart)
+						renderCasRequest(requestPart);
+				}
+				// Last login response body, rendered under the request.
+				var rStart = raw.indexOf('\n---response---\n');
+				if (rStart >= 0) {
+					var resp = raw.slice(rStart + '\n---response---\n'.length)
+						.replace(/\n?---end-response---[\s\S]*$/, '').trim();
+					renderCasResponse(resp);
+				}
 			}).catch(function() {});
 		};
 
@@ -1112,7 +1152,8 @@ return view.extend({
 		o = s.option(form.DummyValue, '_cas_body_status', '');
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return '<div id="drcom-cas-body-box" class="drcom-body-box" style="display:none"></div>';
+			return '<div id="drcom-cas-body-box" class="drcom-body-box" style="display:none"></div>' +
+				'<div id="drcom-cas-response-box" class="drcom-body-box" style="display:none"></div>';
 		};
 
 		// --- standalone CAS: perform login and persist cookies ---
@@ -1134,10 +1175,15 @@ return view.extend({
 					showDiag(tr('casLoginFailed'), output || message);
 				else
 					ui.addNotification(null, E('p', text));
+				// Login changes session state everywhere: refresh the status
+				// card, the CAS rows and the response block together.
+				refreshDashboard();
+				loadCasRequest();
 				return refreshCasStatus();
 			}).catch(function(e) {
 				var message = execMessage(e) || tr('casLoginFailed');
 				showDiag(tr('casLoginFailed'), message);
+				refreshDashboard();
 				return refreshCasStatus();
 			});
 		};
