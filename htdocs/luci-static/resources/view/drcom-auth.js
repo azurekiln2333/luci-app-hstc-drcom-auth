@@ -10,9 +10,11 @@
 function collectInterfaces() {
 	var out = {};
 
-	// Interfaces that can never be the WAN.
+	// Interfaces that can never be the WAN: loopback, container bridges, tunnel
+	// devices, dummy devices and UCI device aliases (@name).
 	function isVirtual(name) {
-		return !name || name === 'lo' || name === 'docker0' || name === 'ip6tnl0';
+		return !name || name === 'lo' || name === 'docker0' || name === 'ip6tnl0'
+			|| name === 'dummy0' || name.charAt(0) === '@';
 	}
 
 	try {
@@ -49,14 +51,35 @@ function collectInterfaces() {
 		});
 
 		// Present logical interfaces, labelled "name (device)". Skip virtual
-		// devices such as loopback so they never enter the list.
+		// devices such as loopback so they never enter the list. When several
+		// logical interfaces share one device (e.g. wan and wan6 both on eth0)
+		// pick the most representative name instead of whichever came last.
+		function labelScore(name) {
+			var s = 0;
+			// Prefer the primary interface over its IPv6 companion (wan over wan6).
+			if (/(?:^|[^0-9])6$/.test(name))
+				s -= 10;
+			if (name === 'wan')
+				s += 5;
+			if (name.indexOf('wwan') === 0)
+				s += 2;
+			// Shorter names are usually the canonical ones.
+			s -= name.length * 0.01;
+			return s;
+		}
+
+		var bestLabel = {};
 		Object.keys(ifaces).forEach(function (lname) {
 			var dev = ifaces[lname];
 			if (isVirtual(dev))
 				return;
 			if (out[dev] === undefined)
 				out[dev] = dev;
-			logical[dev] = lname;
+			if (bestLabel[dev] === undefined || labelScore(lname) > labelScore(bestLabel[dev]))
+				bestLabel[dev] = lname;
+		});
+		Object.keys(bestLabel).forEach(function (dev) {
+			logical[dev] = bestLabel[dev];
 		});
 
 		return { devices: Object.keys(out).sort(), logical: logical, current: current };
