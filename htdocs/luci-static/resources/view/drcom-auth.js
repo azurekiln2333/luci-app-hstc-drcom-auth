@@ -29,7 +29,10 @@ function collectInterfaces() {
 		fs.exec_direct('/sbin/uci', [ '-q', 'show', 'network' ]).catch(function () { return ''; }),
 		fs.exec_direct('/bin/ls', [ '-1', '/sys/class/net' ]).catch(function () { return ''; }),
 		fs.exec_direct('/sbin/uci', [ '-q', 'get', 'drcom_auth.main.wan_port' ]).catch(function () { return ''; }),
-		fs.exec_direct('/bin/ip', [ '-4', '-o', 'addr', 'show' ]).catch(function () { return ''; })
+		fs.exec_direct('/sbin/ip', [ '-4', '-o', 'addr', 'show' ]).catch(function () {
+			// Some images ship ip in /bin instead of /sbin.
+			return fs.exec_direct('/bin/ip', [ '-4', '-o', 'addr', 'show' ]).catch(function () { return ''; });
+		})
 	]).then(function (res) {
 		var uci = res[0] || '', ls = res[1] || '', current = (res[2] || '').trim();
 		var ipOut = res[3] || '';
