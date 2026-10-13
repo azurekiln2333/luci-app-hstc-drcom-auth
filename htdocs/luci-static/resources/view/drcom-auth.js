@@ -28,10 +28,20 @@ function collectInterfaces() {
 	return Promise.all([
 		fs.exec_direct('/sbin/uci', [ '-q', 'show', 'network' ]).catch(function () { return ''; }),
 		fs.exec_direct('/bin/ls', [ '-1', '/sys/class/net' ]).catch(function () { return ''; }),
-		fs.exec_direct('/sbin/uci', [ '-q', 'get', 'drcom_auth.main.wan_port' ]).catch(function () { return ''; })
+		fs.exec_direct('/sbin/uci', [ '-q', 'get', 'drcom_auth.main.wan_port' ]).catch(function () { return ''; }),
+		fs.exec_direct('/bin/ip', [ '-4', '-o', 'addr', 'show' ]).catch(function () { return ''; })
 	]).then(function (res) {
 		var uci = res[0] || '', ls = res[1] || '', current = (res[2] || '').trim();
+		var ipOut = res[3] || '';
 		var logical = {};
+		var ips = {};
+
+		// Map device -> first IPv4 address (e.g. "2: eth0    inet 192.168.1.2/24 ...").
+		ipOut.split('\n').forEach(function (l) {
+			var m = l.match(/^\s*\d+:\s+(\S+)\s+inet\s+([0-9.]+)\//);
+			if (m)
+				ips[m[1]] = m[2];
+		});
 
 		// Map each UCI interface to its device.
 		var lines = uci.split('\n');
@@ -82,7 +92,7 @@ function collectInterfaces() {
 			logical[dev] = bestLabel[dev];
 		});
 
-		return { devices: Object.keys(out).sort(), logical: logical, current: current };
+		return { devices: Object.keys(out).sort(), logical: logical, ips: ips, current: current };
 	});
 }
 
@@ -106,9 +116,10 @@ return view.extend({
 		var m, s, o, compactStyle, lang, browserLang, tr;
 		var isEnabled = (data[0] || '').trim() === 'enabled';
 		var publicKeyStatus = (data[1] || '').trim();
-		var ifaceInfo = data[2] || { devices: [], logical: {}, current: '' };
+		var ifaceInfo = data[2] || { devices: [], logical: {}, ips: {}, current: '' };
 		var ifaceDevices = ifaceInfo.devices || [];
 		var ifaceLogical = ifaceInfo.logical || {};
+		var ifaceIps = ifaceInfo.ips || {};
 		var savedWanPort = ifaceInfo.current || '';
 
 		// Parse `accounts_list`: one "<id>\t<username>\t<active|->" per line.
@@ -162,9 +173,7 @@ return view.extend({
 				accountDeleteConfirm: '确定删除账号 %s 吗？',
 				accountSwitched: '已切换当前账号。',
 				accountSwitchFailed: '切换账号失败',
-				accountIdHint: '账号标识（留空自动生成）',
 				accountNeedUsername: '请填写用户名。',
-				accountBadId: '账号标识无效。',
 				connectNow: '一键登录并认证',
 				connectNowDesc: '确保已登录并执行联网检测；已登录时会自动跳过。',
 				connectRunning: '认证中...',
@@ -229,6 +238,8 @@ return view.extend({
 				doCasLogout: '清除本地会话',
 				casLogoutDone: '已清除本地 CAS 会话。',
 				wanPort: 'WAN 接口',
+				wanIp: '接口 IP 地址',
+				wanIpNone: '未获取到 IP',
 				wanPortDesc: '从路由器接口列表中选择用于上网的 WAN 网口。',
 				deviceType: '设备类型',
 				deviceTypeDesc: '以什么设备登录 Dr.COM：电脑或移动设备。',
@@ -286,9 +297,7 @@ return view.extend({
 				accountDeleteConfirm: '確定刪除帳號 %s 嗎？',
 				accountSwitched: '已切換目前帳號。',
 				accountSwitchFailed: '切換帳號失敗',
-				accountIdHint: '帳號識別（留空自動產生）',
 				accountNeedUsername: '請填寫使用者名稱。',
-				accountBadId: '帳號識別無效。',
 				connectNow: '一鍵登入並認證',
 				connectNowDesc: '確保已登入並執行連網偵測；已登入時會自動略過。',
 				connectRunning: '認證中...',
@@ -353,6 +362,8 @@ return view.extend({
 				doCasLogout: '清除本機會話',
 				casLogoutDone: '已清除本機 CAS 工作階段。',
 				wanPort: 'WAN 介面',
+				wanIp: '介面 IP 位址',
+				wanIpNone: '未取得 IP',
 				wanPortDesc: '從路由器介面清單中選擇用於上網的 WAN 網口。',
 				deviceType: '裝置類型',
 				deviceTypeDesc: '以什麼裝置登入 Dr.COM：電腦或行動裝置。',
@@ -410,9 +421,7 @@ return view.extend({
 				accountDeleteConfirm: 'Delete account %s?',
 				accountSwitched: 'Active account switched.',
 				accountSwitchFailed: 'Failed to switch account',
-				accountIdHint: 'Account id (auto if blank)',
 				accountNeedUsername: 'Please enter a username.',
-				accountBadId: 'Invalid account id.',
 				connectNow: 'Log In and Authenticate',
 				connectNowDesc: 'Ensure a login exists and run the connectivity check; skipped when already logged in.',
 				connectRunning: 'Authenticating...',
@@ -477,6 +486,8 @@ return view.extend({
 				doCasLogout: 'Clear Local Session',
 				casLogoutDone: 'Local CAS session cleared.',
 				wanPort: 'WAN Interface',
+				wanIp: 'Interface IP',
+				wanIpNone: 'No IP address',
 				wanPortDesc: 'Pick the WAN network interface used for authentication.',
 				deviceType: 'Device Type',
 				deviceTypeDesc: 'Which device type to register when logging in to Dr.COM (PC or mobile).',
@@ -773,22 +784,20 @@ return view.extend({
 			});
 		};
 
-		var addAccount = function(idInput, userInput, passInput) {
-			var id = (idInput.value || '').trim();
+		var addAccount = function(userInput, passInput) {
 			var user = (userInput.value || '').trim();
 			var pass = passInput.value || '';
 			if (!user) {
 				ui.addNotification(null, E('p', tr('accountNeedUsername')), 'error');
 				return;
 			}
-			// Derive a stable id when the user leaves it blank.
-			if (!id)
-				id = 'acc' + (accounts.length + 1);
-			id = id.replace(/[^A-Za-z0-9_.-]/g, '');
-			if (!id) {
-				ui.addNotification(null, E('p', tr('accountBadId')), 'error');
-				return;
-			}
+			// The id is always generated; users never supply it.
+			var n = accounts.length + 1;
+			var id;
+			do {
+				id = 'acc' + n;
+				n++;
+			} while (accounts.some(function(a) { return a.id === id; }));
 			fs.exec('/etc/init.d/drcom_auth', [ 'account_upsert', id, user, pass ]).then(function() {
 				ui.addNotification(null, E('p', tr('accountSaved')));
 				reloadSoon();
@@ -886,6 +895,16 @@ return view.extend({
 		});
 		if (!wanDevices.length)
 			o.placeholder = 'eth1';
+
+		// Show the selected interface's IPv4 address below the dropdown,
+		// updated live when the selection changes.
+		o = s.option(form.DummyValue, '_wan_ip', tr('wanIp'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			var cur = savedWanPort || (wanDevices[0] || '');
+			var ip = ifaceIps[cur] || tr('wanIpNone');
+			return '<span id="drcom-wan-ip" class="drcom-result">' + htmlEscape(ip) + '</span>';
+		};
 
 		o = s.option(form.ListValue, 'mac_type', tr('deviceType'));
 		o.value('1', tr('pc'));
@@ -1230,7 +1249,6 @@ return view.extend({
 			return '<div id="drcom-accounts-editor">' + rows + '</div>' +
 				'<div class="drcom-acc-add">' +
 				'<div class="drcom-body-label">' + htmlEscape(tr('accountAdd')) + '</div>' +
-				'<input type="text" id="drcom-acc-new-id" class="cbi-input-text" placeholder="' + htmlEscape(tr('accountIdHint')) + '"/>' +
 				'<input type="text" id="drcom-acc-new-user" class="cbi-input-text" placeholder="202400000000"/>' +
 				'<input type="password" id="drcom-acc-new-pass" class="cbi-input-text" placeholder="' + htmlEscape(tr('password')) + '"/>' +
 				'<button type="button" class="cbi-button cbi-button-action" id="drcom-acc-save">' + htmlEscape(tr('accountSave')) + '</button>' +
@@ -1320,6 +1338,23 @@ return view.extend({
 					window.location.reload();
 				});
 			}
+
+			// WAN dropdown: show the selected interface's IPv4 below it.
+			var wanSel = viewNode.querySelector('[name="wan_port"]');
+			if (!wanSel) {
+				// LuCI may render a widget wrapper; fall back to the inner select.
+				var fields = viewNode.querySelectorAll('select');
+				for (var fi = 0; fi < fields.length; fi++) {
+					if (fields[fi].value && ifaceIps[fields[fi].value] !== undefined) { wanSel = fields[fi]; break; }
+				}
+			}
+			if (wanSel) {
+				wanSel.addEventListener('change', function() {
+					var ipNode = document.getElementById('drcom-wan-ip');
+					if (ipNode)
+						ipNode.textContent = ifaceIps[wanSel.value] || tr('wanIpNone');
+				});
+			}
 			// Account dropdown: switch the active account in place.
 			var acctSel = viewNode.querySelector('#drcom-account-select');
 			if (acctSel) {
@@ -1337,8 +1372,7 @@ return view.extend({
 
 			// Wire the accounts manager (event delegation; the markup is emitted
 			// by the section's cfgvalue, so we bind here once it is in the DOM).
-			var accEditor = viewNode.querySelector('#drcom-accounts-editor');
-			if (accEditor) {
+			var accEditor = viewNode.querySelector('#drcom-accounts-editor');			if (accEditor) {
 				accEditor.addEventListener('change', function(ev) {
 					if (ev.target && ev.target.name === 'drcom-active-account')
 						setActive(ev.target.value);
@@ -1352,8 +1386,7 @@ return view.extend({
 			var saveBtn = viewNode.querySelector('#drcom-acc-save');
 			if (saveBtn) {
 				saveBtn.addEventListener('click', function() {
-					addAccount(viewNode.querySelector('#drcom-acc-new-id'),
-						viewNode.querySelector('#drcom-acc-new-user'),
+					addAccount(viewNode.querySelector('#drcom-acc-new-user'),
 						viewNode.querySelector('#drcom-acc-new-pass'));
 				});
 			}

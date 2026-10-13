@@ -3,7 +3,7 @@
 const fs = require('fs');
 const src = fs.readFileSync(__dirname + '/../htdocs/luci-static/resources/view/drcom-auth.js', 'utf8');
 
-const need = ['drcom-accounts-editor', 'drcom-acc-new-id', 'drcom-acc-new-user',
+const need = ['drcom-accounts-editor', 'drcom-acc-new-user',
   'drcom-acc-new-pass', 'drcom-acc-save', 'data-acc-del', 'drcom-active-account',
   'drcom-acc-row', 'drcom-acc-add'];
 let ok = true;
