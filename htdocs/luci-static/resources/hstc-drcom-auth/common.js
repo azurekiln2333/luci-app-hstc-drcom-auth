@@ -197,7 +197,7 @@ function parseAccounts(raw) {
 				enable: '启用联网检测',
 				username: '账号',
 				password: '密码',
-				publicKey: 'CAS 公钥',
+				casServer: 'CAS 服务器',
 				publicKeyUrl: '公钥地址',
 				updatePublicKey: '更新公钥',
 				publicKeyStatus: '公钥状态',
@@ -339,7 +339,7 @@ function parseAccounts(raw) {
 				enable: '啟用連網偵測',
 				username: '帳號',
 				password: '密碼',
-				publicKey: 'CAS 公鑰',
+				casServer: 'CAS 伺服器',
 				publicKeyUrl: '公鑰位址',
 				updatePublicKey: '更新公鑰',
 				publicKeyStatus: '公鑰狀態',
@@ -481,7 +481,7 @@ function parseAccounts(raw) {
 				enable: 'Enable Network Check',
 				username: 'Username',
 				password: 'Password',
-				publicKey: 'CAS Public Key',
+				casServer: 'CAS Server',
 				publicKeyUrl: 'Public Key URL',
 				updatePublicKey: 'Update Public Key',
 				publicKeyStatus: 'Public Key Status',
@@ -597,6 +597,16 @@ function makeBaseHelpers(tr) {
 
 	function execFailed(obj, message) {
 		return (obj && obj.code) || /(^|\n).*failed:/i.test(message || '');
+	}
+
+	// One label + plain-text value (no input/textarea). The value is written via
+	// textContent so it is escaped automatically. Used for the verdict detail.
+	function textRow(label, value) {
+		var span = E('span', { 'class': 'drcom-body-text' }, [ String(value == null ? '' : value) ]);
+		return E('div', { 'class': 'drcom-body-row' }, [
+			E('div', { 'class': 'drcom-body-label' }, [ label ]),
+			E('div', { 'class': 'drcom-body-value' }, [ span ])
+		]);
 	}
 
 	// One label + read-only textarea + copy button.
@@ -923,6 +933,7 @@ function makeBaseHelpers(tr) {
 		publicKeyStatusText: publicKeyStatusText,
 		execMessage: execMessage,
 		execFailed: execFailed,
+		textRow: textRow,
 		casFieldRow: casFieldRow,
 		copyToClipboard: copyToClipboard,
 		showDiag: showDiag,
@@ -958,6 +969,7 @@ function style() {
 		'.drcom-body-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:6px}',
 		'.drcom-body-label{flex:0 0 150px;font-weight:600;padding-top:6px}',
 		'.drcom-body-value{flex:1 1 auto;min-width:0}',
+		'.drcom-body-text{display:inline-block;font-family:monospace;font-size:12px;word-break:break-all;white-space:pre-wrap;padding-top:6px}',
 		'.drcom-body-field{width:100%;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;resize:vertical}',
 		'.drcom-body-row .cbi-button{flex:0 0 auto}',
 		'.drcom-diag-title{font-weight:600;margin-bottom:4px}',

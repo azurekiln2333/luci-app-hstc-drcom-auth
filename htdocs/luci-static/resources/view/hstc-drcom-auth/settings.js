@@ -39,10 +39,15 @@ return view.extend({
 				'</select>';
 		};
 
-		/* ---- CAS public key (global, not per account) ---- */
-		s = m.section(form.TypedSection, 'drcom_auth', tr('publicKey'));
+		/* ---- CAS server: base URL and public key (global, not per account) ---- */
+		s = m.section(form.TypedSection, 'drcom_auth', tr('casServer'));
 		s.anonymous = true;
 		s.addremove = false;
+
+		o = s.option(form.Value, 'hscas_url', tr('casUrl'));
+		o.placeholder = 'https://hscas.hstc.edu.cn';
+		o.default = 'https://hscas.hstc.edu.cn';
+		o.rmempty = false;
 
 		o = s.option(form.Value, 'hscas_public_key_url', tr('publicKeyUrl'));
 		o.placeholder = 'https://hscas.hstc.edu.cn/cas/jwt/publicKey';

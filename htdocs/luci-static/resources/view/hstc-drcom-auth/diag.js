@@ -52,12 +52,12 @@ return view.extend({
 				}
 				if (box) {
 					box.innerHTML = '';
-					box.appendChild(h.casFieldRow(tr('authDetailProbe'), v.portal_probe || '(none)'));
-					box.appendChild(h.casFieldRow(tr('authDetailResult'), v.portal || 'unknown'));
-					box.appendChild(h.casFieldRow('uid', v.portal_uid || '(none)'));
-					box.appendChild(h.casFieldRow('ip', v.portal_ip || '(none)'));
-					box.appendChild(h.casFieldRow('stime', v.portal_since || '(none)'));
-					box.appendChild(h.casFieldRow('etime', v.portal_until || '(none)'));
+					box.appendChild(h.textRow(tr('authDetailProbe'), v.portal_probe || '(none)'));
+					box.appendChild(h.textRow(tr('authDetailResult'), v.portal || 'unknown'));
+					box.appendChild(h.textRow('uid', v.portal_uid || '(none)'));
+					box.appendChild(h.textRow('ip', v.portal_ip || '(none)'));
+					box.appendChild(h.textRow('stime', v.portal_since || '(none)'));
+					box.appendChild(h.textRow('etime', v.portal_until || '(none)'));
 					box.appendChild(h.casFieldRow(tr('authDetailRaw'), raw));
 					box.style.display = '';
 				}
@@ -120,11 +120,6 @@ return view.extend({
 		o.cfgvalue = function() {
 			return h.accountSelectHtml(accounts);
 		};
-
-		o = s.option(form.Value, 'hscas_url', tr('casUrl'));
-		o.placeholder = 'https://hscas.hstc.edu.cn';
-		o.default = 'https://hscas.hstc.edu.cn';
-		o.rmempty = false;
 
 		o = s.option(form.Button, '_cas_params', tr('casParams'));
 		o.inputtitle = tr('fetchCasParams');
@@ -285,7 +280,8 @@ return view.extend({
 		o = s.option(form.DummyValue, '_auth_detail', tr('authDetail'));
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			return '<div id="drcom-auth-detail" class="drcom-body-box" style="display:none"></div>';
+			// Expanded by default: runAuthCheck() on load fills it.
+			return '<div id="drcom-auth-detail" class="drcom-body-box"></div>';
 		};
 
 		// Trace of the Dr.COM auth chain (status log + each stage's response and
@@ -337,6 +333,8 @@ return view.extend({
 			h.refreshDashboard();
 			h.refreshCasStatus();
 			h.loadCasRequest();
+			// Run the verdict check once on open so the detail is populated.
+			runAuthCheck();
 			return viewNode;
 		});
 	}
