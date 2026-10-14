@@ -24,6 +24,51 @@ return view.extend({
 		var h = common.makeBaseHelpers(tr);
 		var publicKeyStatus = (data[0] || '').trim();
 
+		// Query the Dr.COM portal state and render the decision details: the
+		// connectivity probe result and the uid/ip/session fields that were read,
+		// so it is visible how "authenticated" was decided.
+		var runAuthCheck = function() {
+			var status = document.getElementById('drcom-auth-status');
+			var box = document.getElementById('drcom-auth-detail');
+			if (status)
+				status.textContent = tr('authChecking');
+			if (box)
+				box.style.display = 'none';
+			return fs.exec('/etc/init.d/drcom_auth', [ 'portal_status' ]).then(function(res) {
+				var raw = (res && res.stdout ? res.stdout : '').trim();
+				var v = {};
+				raw.split('\n').forEach(function(line) {
+					var eq = line.indexOf('=');
+					if (eq > 0) v[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+				});
+				if (status) {
+					if (v.portal === 'online')
+						status.textContent = v.portal_uid ? h.format(tr('statusDrcomOnlineAcct'), v.portal_uid) : tr('statusDrcomOnline');
+					else if (v.portal === 'offline')
+						status.textContent = tr('statusDrcomOffline');
+					else
+						status.textContent = tr('statusUnknown');
+				}
+				if (box) {
+					box.innerHTML = '';
+					box.appendChild(h.casFieldRow(tr('authDetailProbe'), v.portal_probe || '(none)'));
+					box.appendChild(h.casFieldRow(tr('authDetailResult'), v.portal || 'unknown'));
+					box.appendChild(h.casFieldRow('uid', v.portal_uid || '(none)'));
+					box.appendChild(h.casFieldRow('ip', v.portal_ip || '(none)'));
+					box.appendChild(h.casFieldRow('stime', v.portal_since || '(none)'));
+					box.appendChild(h.casFieldRow('etime', v.portal_until || '(none)'));
+					box.appendChild(h.casFieldRow(tr('authDetailRaw'), raw));
+					box.style.display = '';
+				}
+				// Keep the Online Auth status card in sync as well.
+				h.refreshDashboard();
+			}).catch(function(e) {
+				if (status)
+					status.textContent = tr('authFailed');
+				h.showDiag(tr('authDetail'), h.execMessage(e));
+			});
+		};
+
 		m = new form.Map('drcom_auth', tr('title'), tr('desc'));
 
 		/* ---- step 1: web authorize URL ---- */
@@ -250,6 +295,21 @@ return view.extend({
 		o.rawhtml = true;
 		o.cfgvalue = function() {
 			return '<span id="drcom-auth-status">' + tr('authIdle') + '</span>';
+		};
+
+		// Refresh the Dr.COM state and show how it was decided (the portal
+		// probe plus the uid/ip/session fields it read).
+		o = s.option(form.Button, '_auth_check', tr('authCheck'));
+		o.inputtitle = tr('refreshStatus');
+		o.inputstyle = 'apply';
+		o.onclick = function() {
+			return runAuthCheck();
+		};
+
+		o = s.option(form.DummyValue, '_auth_detail', tr('authDetail'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<div id="drcom-auth-detail" class="drcom-body-box" style="display:none"></div>';
 		};
 
 		// Trace of the Dr.COM auth chain (status log + each stage's response and

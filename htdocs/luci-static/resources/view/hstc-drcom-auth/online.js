@@ -59,6 +59,17 @@ return view.extend({
 			return '<span id="drcom-status-cookie" class="drcom-result">' + tr('statusUnknown') + '</span>';
 		};
 
+		// Manual refresh: re-read the Dr.COM portal state, the CAS session and
+		// the connectivity, so the rows above can be updated on demand.
+		o = s.option(form.Button, '_status_refresh', tr('refreshStatus'));
+		o.inputtitle = tr('refreshStatus');
+		o.inputstyle = 'apply';
+		o.onclick = function() {
+			return h.refreshDashboard().then(function() {
+				ui.addNotification(null, E('p', tr('statusRefreshed')));
+			});
+		};
+
 		/* ---- account card (dropdown + one-click login + result) ---- */
 		s = m.section(form.TypedSection, 'drcom_auth', tr('account'));
 		s.anonymous = true;
