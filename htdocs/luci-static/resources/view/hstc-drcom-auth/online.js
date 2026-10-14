@@ -78,15 +78,7 @@ return view.extend({
 		o = s.option(form.DummyValue, '_account_select', tr('activeAccount'));
 		o.rawhtml = true;
 		o.cfgvalue = function() {
-			if (!accounts.length)
-				return '<span class="drcom-result">' + tr('noAccounts') + '</span>';
-			var html = '<select id="drcom-account-select" class="cbi-input-select">';
-			accounts.forEach(function(a) {
-				html += '<option value="' + h.htmlEscape(a.id) + '"' +
-					(a.active ? ' selected="selected"' : '') + '>' +
-					h.htmlEscape(a.username || a.id) + '</option>';
-			});
-			return html + '</select>';
+			return h.accountSelectHtml(accounts);
 		};
 
 		o = s.option(form.DummyValue, '_account_hint', '');
@@ -202,19 +194,12 @@ return view.extend({
 			}
 
 			// Account dropdown: switch the active account in place.
-			var acctSel = viewNode.querySelector('#drcom-account-select');
-			if (acctSel) {
-				acctSel.addEventListener('change', function() {
-					var id = acctSel.value;
-					acctSel.disabled = true;
-					fs.exec('/etc/init.d/drcom_auth', [ 'account_set_active', id ]).then(function() {
-						ui.addNotification(null, E('p', tr('accountSwitched')));
-						return h.refreshCasStatus();
-					}).catch(function(e) {
-						ui.addNotification(null, E('p', h.execMessage(e) || tr('accountSwitchFailed')), 'error');
-					}).then(function() { acctSel.disabled = false; });
-				});
-			}
+			h.wireAccountSelect(viewNode, {
+				afterSwitch: function() {
+					h.clearCasOutput();
+					return Promise.all([ h.refreshCasStatus(), h.refreshDashboard() ]);
+				}
+			});
 
 			h.refreshDashboard();
 			h.refreshCasStatus();

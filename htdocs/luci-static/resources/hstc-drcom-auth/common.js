@@ -190,12 +190,14 @@ function parseAccounts(raw) {
 				showAuthTrace: '查看认证诊断',
 				authTraceLoading: '读取中...',
 				authTraceEmpty: '暂无认证记录，请先执行认证。',
-				authTraceSummary: '状态日志',				authRunning: '认证中...',
+				authTraceSummary: '状态日志',
+				authRunning: '认证中...',
 				authDone: '已执行认证。',
 				authFailed: '认证失败',
 				enable: '启用联网检测',
 				username: '账号',
 				password: '密码',
+				publicKey: 'CAS 公钥',
 				publicKeyUrl: '公钥地址',
 				updatePublicKey: '更新公钥',
 				publicKeyStatus: '公钥状态',
@@ -210,7 +212,6 @@ function parseAccounts(raw) {
 				casParamsIdle: '未获取',
 				casParamsFetching: '获取中...',
 				casParamsFailed: '获取 CAS 参数失败',
-				casUrlDesc: '基础地址或完整登录地址均可，例如 https://hscas.hstc.edu.cn 或 https://hscas.hstc.edu.cn/cas/login。',
 				casParamsSaved: '已保存参数：currentMenu=%s，failN=%s，_eventId=%s（%s）',
 				casLogin: 'CAS 登录',
 				doCasLogin: '获取 Cookie 并登录',
@@ -338,6 +339,7 @@ function parseAccounts(raw) {
 				enable: '啟用連網偵測',
 				username: '帳號',
 				password: '密碼',
+				publicKey: 'CAS 公鑰',
 				publicKeyUrl: '公鑰位址',
 				updatePublicKey: '更新公鑰',
 				publicKeyStatus: '公鑰狀態',
@@ -352,7 +354,6 @@ function parseAccounts(raw) {
 				casParamsIdle: '未取得',
 				casParamsFetching: '取得中...',
 				casParamsFailed: '取得 CAS 參數失敗',
-				casUrlDesc: '基礎位址或完整登入位址均可，例如 https://hscas.hstc.edu.cn 或 https://hscas.hstc.edu.cn/cas/login。',
 				casParamsSaved: '已儲存參數：currentMenu=%s，failN=%s，_eventId=%s（%s）',
 				casLogin: 'CAS 登入',
 				doCasLogin: '取得 Cookie 並登入',
@@ -480,6 +481,7 @@ function parseAccounts(raw) {
 				enable: 'Enable Network Check',
 				username: 'Username',
 				password: 'Password',
+				publicKey: 'CAS Public Key',
 				publicKeyUrl: 'Public Key URL',
 				updatePublicKey: 'Update Public Key',
 				publicKeyStatus: 'Public Key Status',
@@ -494,7 +496,6 @@ function parseAccounts(raw) {
 				casParamsIdle: 'Not fetched',
 				casParamsFetching: 'Fetching...',
 				casParamsFailed: 'Fetch CAS parameters failed',
-				casUrlDesc: 'Either the base host or the full login URL works, e.g. https://hscas.hstc.edu.cn or https://hscas.hstc.edu.cn/cas/login.',
 				casParamsSaved: 'Saved params: currentMenu=%s, failN=%s, _eventId=%s (%s)',
 				casLogin: 'CAS Login',
 				doCasLogin: 'Get Cookie and Log In',
@@ -746,6 +747,54 @@ function makeBaseHelpers(tr) {
 		box.style.display = '';
 	}
 
+	// Shared account selector used by the Online Auth and Diagnostics tabs, so
+	// both pages offer the same control bound to main.active_account. Returns the
+	// HTML for the <select> (or an idle hint when there are no accounts).
+	function accountSelectHtml(accounts) {
+		if (!accounts || !accounts.length)
+			return '<span class="drcom-result">' + htmlEscape(tr('noAccounts')) + '</span>';
+		var html = '<select id="drcom-account-select" class="cbi-input-select">';
+		accounts.forEach(function(a) {
+			html += '<option value="' + htmlEscape(a.id) + '"' +
+				(a.active ? ' selected="selected"' : '') + '>' +
+				htmlEscape(a.username || a.id) + '</option>';
+		});
+		return html + '</select>';
+	}
+
+	// Bind the account selector inside `root`. Switching sets the active account
+	// and then runs `afterSwitch` (e.g. refresh status/request and clear stale
+	// output) so every caller stays consistent.
+	function wireAccountSelect(root, opts) {
+		opts = opts || {};
+		var sel = root && root.querySelector('#drcom-account-select');
+		if (!sel)
+			return;
+		sel.addEventListener('change', function() {
+			var id = sel.value;
+			sel.disabled = true;
+			fs.exec('/etc/init.d/drcom_auth', [ 'account_set_active', id ]).then(function() {
+				ui.addNotification(null, E('p', tr('accountSwitched')));
+				if (opts.afterSwitch)
+					return opts.afterSwitch(id);
+			}).catch(function(e) {
+				ui.addNotification(null, E('p', execMessage(e) || tr('accountSwitchFailed')), 'error');
+			}).then(function() { sel.disabled = false; });
+		});
+	}
+
+	// Empty the assembled request / response boxes (used when the active account
+	// changes, so the previous account's output does not linger).
+	function clearCasOutput() {
+		[ 'drcom-cas-body-box', 'drcom-cas-response-box' ].forEach(function(id) {
+			var box = document.getElementById(id);
+			if (box) {
+				box.innerHTML = '';
+				box.style.display = 'none';
+			}
+		});
+	}
+
 	// Read the CAS status and update the params / cookie rows.
 	function refreshCasStatus() {
 		return fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).then(function (res) {
@@ -877,6 +926,9 @@ function makeBaseHelpers(tr) {
 		casFieldRow: casFieldRow,
 		copyToClipboard: copyToClipboard,
 		showDiag: showDiag,
+		accountSelectHtml: accountSelectHtml,
+		wireAccountSelect: wireAccountSelect,
+		clearCasOutput: clearCasOutput,
 		renderAuthTrace: renderAuthTrace,
 		renderCasRequest: renderCasRequest,
 		renderCasResponse: renderCasResponse,
@@ -910,7 +962,8 @@ function style() {
 		'.drcom-body-row .cbi-button{flex:0 0 auto}',
 		'.drcom-diag-title{font-weight:600;margin-bottom:4px}',
 		'.drcom-diag-pre{background:rgba(0,0,0,.55);color:inherit;padding:8px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;margin:0}',
-		'.drcom-preview-frame{width:100%;height:320px;border:1px solid rgba(128,128,128,.4);border-radius:4px;background:#fff}',
+		'.drcom-preview-frame{width:100%;height:160px;border:1px solid rgba(128,128,128,.4);border-radius:4px;background:#fff}',
+		'#drcom-cas-response-box .drcom-body-field{max-height:200px;overflow:auto}',
 		'.drcom-acc-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(128,128,128,.25)}',
 		'.drcom-acc-user{font-weight:600}',
 		'.drcom-acc-id{opacity:.6;font-size:12px}',

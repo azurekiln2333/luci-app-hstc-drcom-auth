@@ -12,17 +12,14 @@
 return view.extend({
 	load: function() {
 		return Promise.all([
-			fs.exec_direct('/etc/init.d/drcom_auth', [ 'public_key_status' ]).catch(function(e) {
-				return [ e && e.stdout, e && e.stderr, e && e.message ]
-					.filter(function(v) { return v; }).join('\n').trim();
-			})
+			fs.exec_direct('/etc/init.d/drcom_auth', [ 'accounts_list' ]).catch(function() { return ''; })
 		]);
 	},
 
 	render: function(data) {
 		var m, s, o, tr = common.makeTranslator();
 		var h = common.makeBaseHelpers(tr);
-		var publicKeyStatus = (data[0] || '').trim();
+		var accounts = common.parseAccounts(data[0]);
 
 		// Query the Dr.COM portal state and render the decision details: the
 		// connectivity probe result and the uid/ip/session fields that were read,
@@ -117,46 +114,17 @@ return view.extend({
 		s.addremove = false;
 		s.description = tr('casStep');
 
+		// Active account: shared with the Online Auth tab (main.active_account).
+		o = s.option(form.DummyValue, '_cas_account', tr('activeAccount'));
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return h.accountSelectHtml(accounts);
+		};
+
 		o = s.option(form.Value, 'hscas_url', tr('casUrl'));
 		o.placeholder = 'https://hscas.hstc.edu.cn';
 		o.default = 'https://hscas.hstc.edu.cn';
 		o.rmempty = false;
-		o.description = tr('casUrlDesc');
-
-		o = s.option(form.Value, 'hscas_public_key_url', tr('publicKeyUrl'));
-		o.placeholder = 'https://hscas.hstc.edu.cn/cas/jwt/publicKey';
-		o.default = 'https://hscas.hstc.edu.cn/cas/jwt/publicKey';
-		o.rmempty = false;
-
-		o = s.option(form.Button, '_public_key', tr('updatePublicKey'));
-		o.inputtitle = tr('updatePublicKey');
-		o.inputstyle = 'apply';
-		o.onclick = function() {
-			var node = document.getElementById('drcom-public-key-status');
-			if (node)
-				node.textContent = tr('publicKeyUpdating');
-			return fs.exec('/etc/init.d/drcom_auth', [ 'public_key' ]).then(function(res) {
-				var node = document.getElementById('drcom-public-key-status');
-				var message = h.execMessage(res) || tr('publicKeyDone');
-				var failed = h.execFailed(res, message);
-				var displayMessage = failed ? tr('publicKeyFailed') + ': ' + message : h.publicKeyStatusText(message);
-				if (node)
-					node.textContent = displayMessage;
-				ui.addNotification(null, E('p', displayMessage), failed ? 'error' : undefined);
-			}).catch(function(e) {
-				var node = document.getElementById('drcom-public-key-status');
-				var message = h.execMessage(e) || tr('publicKeyFailed');
-				if (node)
-					node.textContent = tr('publicKeyFailed') + ': ' + message;
-				ui.addNotification(null, E('p', message), 'error');
-			});
-		};
-
-		o = s.option(form.DummyValue, '_public_key_status', tr('publicKeyStatus'));
-		o.rawhtml = true;
-		o.cfgvalue = function() {
-			return '<span id="drcom-public-key-status" class="drcom-result">' + h.htmlEscape(h.publicKeyStatusText(publicKeyStatus)) + '</span>';
-		};
 
 		o = s.option(form.Button, '_cas_params', tr('casParams'));
 		o.inputtitle = tr('fetchCasParams');
@@ -352,6 +320,16 @@ return view.extend({
 
 		return m.render().then(function(map) {
 			var viewNode = E('div', { 'class': 'drcom-auth-view' }, [ common.style(), map ]);
+
+			// Active account: shared with the Online Auth tab. Switching clears the
+			// previous account's request/response output before refreshing.
+			h.wireAccountSelect(viewNode, {
+				afterSwitch: function() {
+					h.clearCasOutput();
+					return Promise.all([ h.refreshCasStatus(), h.loadCasRequest(), h.refreshDashboard() ]);
+				}
+			});
+
 			h.refreshDashboard();
 			h.refreshCasStatus();
 			h.loadCasRequest();
