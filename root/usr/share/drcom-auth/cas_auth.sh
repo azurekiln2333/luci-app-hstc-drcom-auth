@@ -71,6 +71,8 @@ CAS_PARAMS_MAX_AGE="${CAS_PARAMS_MAX_AGE:-120}"
 
 HSCAS_URL="${HSCAS_URL:-https://hscas.hstc.edu.cn}"
 
+# Path of the per-account lockout marker (set when CAS rejects credentials).
+CAS_BAD_CREDS_FILE="${CAS_BAD_CREDS_FILE:-$COOKIE_DIR/bad_credentials}"
 # Dr.COM portal (status queries only; auth still goes through CAS).
 DRCOM_SERVER_IP="${DRCOM_SERVER_IP:-192.168.2.34}"
 DRCOM_PORTAL_URL="http://$DRCOM_SERVER_IP/"
@@ -453,6 +455,27 @@ perform_cas_login() {
 
 	cas_log "CAS login rejected (HTTP $http_code)"
 	persist_cas_state "$(date '+%Y-%m-%d %H:%M:%S')" "rejected" "$http_code"
+
+	# A 401 is the only reliable signal that the credentials were rejected. A
+	# re-served login page can also mean a captcha or an expired execution, so it
+	# must NOT be treated as bad credentials (that would stop the retry loop
+	# forever). cas_message is still extracted, but only for display.
+	local cas_message=""
+	cas_message=$(extract_cas_message)
+	if [ "$http_code" = "401" ]; then
+		cas_log "CAS login rejected: bad credentials (HTTP $http_code)${cas_message:+: $cas_message}"
+		# Remember the rejection so the automatic reconnect loop stops retrying
+		# (repeated failed logins can lock the account). Cleared when the user
+		# switches/edits the account or connects manually.
+		mark_bad_credentials
+		printf 'diagnosis=bad_credentials\n'
+		printf 'cas_message=%s\n' "$cas_message"
+		printf 'http_code=%s\n' "$http_code"
+		printf 'login_url=%s\n' "$HSCAS_LOGIN_URL"
+		printf 'page_saved=%s\n' "$CAS_POST_BODY"
+		return 3
+	fi
+
 	printf 'diagnosis=login rejected by CAS\n'
 	printf 'http_code=%s\n' "$http_code"
 	printf 'login_url=%s\n' "$HSCAS_LOGIN_URL"
@@ -462,6 +485,41 @@ perform_cas_login() {
 	printf 'page_saved=%s\n' "$CAS_POST_BODY"
 	printf 'page_head=%s\n' "$(head -c 400 "$CAS_POST_BODY" 2>/dev/null | tr '\n' ' ')"
 	return 3
+}
+
+# Extract the server's error text from the CAS error block. The real element is
+# <div id="loginError1">...<el-alert title="...."> (verified against a captured
+# 401 response); fall back to the errors array the page also carries.
+extract_cas_message() {
+	local msg
+
+	[ -s "$CAS_POST_BODY" ] || return 0
+
+	msg=$(sed -n 's/.*<el-alert title="\([^"]*\)".*/\1/p' "$CAS_POST_BODY" 2>/dev/null | head -n 1)
+	if [ -z "$msg" ]; then
+		msg=$(sed -n 's/.*var errors = \["\([^"]*\)"\].*/\1/p' "$CAS_POST_BODY" 2>/dev/null | head -n 1)
+	fi
+
+	printf '%s' "$msg"
+}
+
+# --- credential lockout marker ----------------------------------------------
+# Writing a marker file stops the automatic reconnect loop from retrying a
+# rejected password every interval (repeated failures can lock the account).
+mark_bad_credentials() {
+	mkdir -p "$COOKIE_DIR" 2>/dev/null
+	printf '%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$CAS_BAD_CREDS_FILE" 2>/dev/null
+	chmod 600 "$CAS_BAD_CREDS_FILE" 2>/dev/null
+}
+
+clear_bad_credentials() {
+	[ -n "$CAS_BAD_CREDS_FILE" ] || return 0
+	rm -f "$CAS_BAD_CREDS_FILE" 2>/dev/null
+	return 0
+}
+
+has_bad_credentials() {
+	[ -n "$CAS_BAD_CREDS_FILE" ] && [ -s "$CAS_BAD_CREDS_FILE" ]
 }
 
 # Copy the raw response body aside so the panel can display it later. Capped
@@ -644,6 +702,9 @@ cmd_params() {
 
 cmd_login() {
 	local rc
+	# A manual login attempt is an explicit user action, so clear any previous
+	# lockout marker before trying.
+	clear_bad_credentials
 	# Params are captured once by `params` and then reused for every login.
 	# Only fetch when there are none saved yet; never refetch behind the user's
 	# back. Refreshing params is an explicit action (the params button).
@@ -758,6 +819,14 @@ cmd_logout() {
 	printf 'cookie=cleared\n'
 }
 
+# Clear the credential lockout marker (called when the account is switched or
+# edited, or when the user connects manually).
+cmd_clear_bad_credentials() {
+	clear_bad_credentials
+	cas_log "cleared bad-credentials marker"
+	printf 'cleared=1\n'
+}
+
 CMD="${1:-status}"
 case "$CMD" in
 	params) cmd_params ;;
@@ -767,6 +836,7 @@ case "$CMD" in
 	status) cmd_status ;;
 	ensure) cmd_ensure ;;
 	logout) cmd_logout ;;
+	clear_bad_credentials) cmd_clear_bad_credentials ;;
 	portal_status) cmd_portal_status ;;
 	last_response) cmd_last_response ;;
 	auth_trace) cmd_auth_trace ;;

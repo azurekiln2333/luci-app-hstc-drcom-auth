@@ -8,7 +8,7 @@
 START=95
 STOP=10
 USE_PROCD=1
-EXTRA_COMMANDS="authorize ticket login overview cas_params cas_body cas_login cas_status cas_ensure cas_logout portal_status auth_trace public_key public_key_status accounts_list account_set_active account_upsert account_delete"
+EXTRA_COMMANDS="authorize ticket login overview cas_params cas_body cas_login cas_status cas_ensure cas_logout cas_clear_bad_credentials portal_status auth_trace public_key public_key_status accounts_list account_set_active account_upsert account_delete"
 EXTRA_HELP="	authorize		Get the Dr.COM authorize URL only
 	ticket			Run the full Dr.COM login flow now
 	login			Alias of ticket
@@ -18,6 +18,7 @@ EXTRA_HELP="	authorize		Get the Dr.COM authorize URL only
 	cas_status		Show saved CAS parameters and cookie status
 	cas_ensure		CAS login only when the stored cookie is missing/expired
 	cas_logout		Clear the local CAS session (cookie and params)
+	cas_clear_bad_credentials	Clear the credential lockout marker
 	portal_status		Query Dr.COM for the real authentication state
 	auth_trace		Show the Dr.COM auth chain responses and headers
 	public_key		Update the cached HSCAS RSA public key
@@ -185,6 +186,12 @@ cas_login() {
 	/bin/sh "$APP_DIR/cas_auth.sh" login
 }
 
+# Clear the credential lockout marker for the active account (manual connect).
+cas_clear_bad_credentials() {
+	write_config
+	/bin/sh "$APP_DIR/cas_auth.sh" clear_bad_credentials
+}
+
 # Report saved CAS parameters and cookie status.
 cas_status() {
 	write_config
@@ -224,6 +231,15 @@ accounts_list() {
 	done
 }
 
+# Remove the credential lockout marker for an account so the automatic
+# reconnect loop is allowed to try again. Used when an account is switched or
+# edited, or when the user connects manually.
+clear_account_bad_credentials() {
+	local id="$1"
+	[ -n "$id" ] || return 0
+	rm -f "$APP_DIR/info/accounts/$id/bad_credentials" 2>/dev/null || true
+}
+
 # Select the active account (and render its config).
 account_set_active() {
 	local id="$1"
@@ -234,6 +250,8 @@ account_set_active() {
 	}
 	uci -q set "drcom_auth.main.active_account=$id"
 	uci -q commit drcom_auth
+	# Switching accounts is an explicit user action: allow the retry loop again.
+	clear_account_bad_credentials "$id"
 	write_config
 	printf 'active=%s\n' "$id"
 }
@@ -255,7 +273,8 @@ account_upsert() {
 	fi
 	uci -q commit drcom_auth
 
-	# Drop that account's cached session so a changed password starts clean.
+	# Drop that account's cached session (including any credential lockout
+	# marker) so a changed password starts clean.
 	rm -rf "$APP_DIR/info/accounts/$id" 2>/dev/null || true
 
 	write_config

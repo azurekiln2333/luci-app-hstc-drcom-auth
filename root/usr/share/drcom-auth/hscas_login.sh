@@ -172,6 +172,17 @@ if grep -q "successRedirectUrl" "$POST_RESPONSE_CONTENT" || grep -q "登录成�
 	POST_SUCCESS=true
 fi
 
+# A 401 means CAS rejected the credentials. Record the same lockout marker that
+# cas_auth.sh writes, so the periodic auto-reconnect loop (which goes through
+# this script) stops retrying a password that cannot work.
+if [ "$POST_RESPONSE" -eq 401 ]; then
+	BAD_CREDS_FILE="${BAD_CREDS_FILE:-${COOKIE_DIR:-$SCRIPT_DIR}/bad_credentials}"
+	mkdir -p "$(dirname "$BAD_CREDS_FILE")" 2>/dev/null
+	printf '%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$BAD_CREDS_FILE" 2>/dev/null
+	chmod 600 "$BAD_CREDS_FILE" 2>/dev/null
+	output_status "$STATUS_LOG_FILE" "HSCAS login rejected: bad credentials (HTTP 401); auto-retry paused."
+fi
+
 if [ "$POST_RESPONSE" -eq 302 ]; then
 	output_status "$STATUS_LOG_FILE" "Log In hstc Successful."
 	LOCATION=$(grep -i "^Location:" "$HEADERS_FILE" | awk '{print $2}' | tr -d '\r')

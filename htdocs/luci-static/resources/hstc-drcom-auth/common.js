@@ -153,6 +153,16 @@ function parseAccounts(raw) {
 				authDetailProbe: '连通性探测',
 				authDetailResult: '判定结果',
 				authDetailRaw: '原始输出',
+				diagBadCredentials: 'CAS 认证失败：账号或密码错误',
+				diagBadCredentialsMsg: 'CAS 认证失败：账号或密码错误（%s）',
+				diagAlreadyLoggedIn: 'CAS 会话已处于登录状态。',
+				diagBadLoginForm: 'CAS 登录页解析失败，请重试。',
+				diagCurlFailed: '网络请求失败，请检查网络后重试。',
+				diagUnexpectedHttp: 'CAS 返回了异常状态码，请重试。',
+				diagRejected: 'CAS 拒绝了本次登录。',
+				diagGeneric: '认证失败，请查看诊断详情。',
+				diagSeeDiagnostics: '详情见诊断页。',
+				diagRawOutput: '原始输出',
 				tabAccounts: '账号管理',
 				accountsTab: '账号管理',
 				activeAccount: '当前账号',
@@ -295,6 +305,16 @@ function parseAccounts(raw) {
 				authDetailProbe: '連線偵測',
 				authDetailResult: '判定結果',
 				authDetailRaw: '原始輸出',
+				diagBadCredentials: 'CAS 認證失敗：帳號或密碼錯誤',
+				diagBadCredentialsMsg: 'CAS 認證失敗：帳號或密碼錯誤（%s）',
+				diagAlreadyLoggedIn: 'CAS 工作階段已處於登入狀態。',
+				diagBadLoginForm: 'CAS 登入頁解析失敗，請重試。',
+				diagCurlFailed: '網路請求失敗，請檢查網路後重試。',
+				diagUnexpectedHttp: 'CAS 回應了異常狀態碼，請重試。',
+				diagRejected: 'CAS 拒絕了本次登入。',
+				diagGeneric: '認證失敗，請查看診斷詳情。',
+				diagSeeDiagnostics: '詳情見診斷頁。',
+				diagRawOutput: '原始輸出',
 				tabAccounts: '帳號管理',
 				accountsTab: '帳號管理',
 				activeAccount: '目前帳號',
@@ -437,6 +457,16 @@ function parseAccounts(raw) {
 				authDetailProbe: 'Connectivity Probe',
 				authDetailResult: 'Verdict',
 				authDetailRaw: 'Raw Output',
+				diagBadCredentials: 'CAS authentication failed: wrong username or password',
+				diagBadCredentialsMsg: 'CAS authentication failed: wrong username or password (%s)',
+				diagAlreadyLoggedIn: 'The CAS session is already logged in.',
+				diagBadLoginForm: 'Could not parse the CAS login form; try again.',
+				diagCurlFailed: 'Network request failed; check the connection and retry.',
+				diagUnexpectedHttp: 'CAS returned an unexpected status code; retry.',
+				diagRejected: 'CAS rejected this login.',
+				diagGeneric: 'Authentication failed; see the diagnostics for details.',
+				diagSeeDiagnostics: 'See the Diagnostics tab for details.',
+				diagRawOutput: 'Raw Output',
 				tabAccounts: 'Accounts',
 				accountsTab: 'Accounts',
 				activeAccount: 'Active Account',
@@ -609,6 +639,41 @@ function makeBaseHelpers(tr) {
 		]);
 	}
 
+	// Parse a key=value diagnostic dump into an object.
+	function parseDiag(raw) {
+		var v = {};
+		String(raw || '').split('\n').forEach(function(line) {
+			var eq = line.indexOf('=');
+			if (eq > 0)
+				v[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+		});
+		return v;
+	}
+
+	// Turn a diagnostic dump into one short sentence. Never includes the raw
+	// body/execution/password: only the mapped message and the server's own text.
+	function diagSentence(raw) {
+		var v = parseDiag(raw);
+		switch (v.diagnosis) {
+			case 'bad_credentials':
+				return v.cas_message
+					? format(tr('diagBadCredentialsMsg'), v.cas_message)
+					: tr('diagBadCredentials');
+			case 'already logged in':
+				return tr('diagAlreadyLoggedIn');
+			case 'login form fm1 not found in page':
+				return tr('diagBadLoginForm');
+			case 'curl failed':
+				return tr('diagCurlFailed');
+			case 'unexpected HTTP status':
+				return tr('diagUnexpectedHttp');
+			case 'login rejected by CAS':
+				return tr('diagRejected');
+			default:
+				return tr('diagGeneric');
+		}
+	}
+
 	// One label + read-only textarea + copy button.
 	function casFieldRow(label, value) {
 		var area = E('textarea', {
@@ -654,19 +719,22 @@ function makeBaseHelpers(tr) {
 		return Promise.resolve(legacyCopy(text));
 	}
 
-	// Render a failure diagnosis in the shared detail box.
-	function showDiag(title, text) {
+	// Show a failure: the notification carries only the short sentence, while the
+	// full raw output goes into a collapsed <details> in the diagnostics box.
+	function showDiag(title, raw) {
+		var sentence = diagSentence(raw);
 		var box = document.getElementById('drcom-cas-body-box');
 		if (box) {
 			box.innerHTML = '';
-			box.appendChild(E('div', { 'class': 'drcom-diag-title' }, [ title ]));
-			box.appendChild(E('pre', { 'class': 'drcom-diag-pre' }, [ String(text || '') ]));
+			box.appendChild(E('div', { 'class': 'drcom-diag-title' }, [ sentence ]));
+			box.appendChild(E('details', { 'class': 'drcom-diag-details' }, [
+				E('summary', {}, [ tr('diagRawOutput') ]),
+				E('pre', { 'class': 'drcom-diag-pre' }, [ String(raw || '') ])
+			]));
 			box.style.display = '';
 		}
-		ui.addNotification(null, E('div', {}, [
-			E('p', {}, [ title ]),
-			E('pre', { 'class': 'drcom-diag-pre' }, [ String(text || '') ])
-		]), 'error');
+		ui.addNotification(null, E('p', {}, [ sentence ]), 'error');
+		return sentence;
 	}
 
 	// Render the raw HTTP request (request line, headers, body) into rows.
@@ -933,6 +1001,8 @@ function makeBaseHelpers(tr) {
 		publicKeyStatusText: publicKeyStatusText,
 		execMessage: execMessage,
 		execFailed: execFailed,
+		parseDiag: parseDiag,
+		diagSentence: diagSentence,
 		textRow: textRow,
 		casFieldRow: casFieldRow,
 		copyToClipboard: copyToClipboard,
@@ -973,6 +1043,8 @@ function style() {
 		'.drcom-body-field{width:100%;font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;resize:vertical}',
 		'.drcom-body-row .cbi-button{flex:0 0 auto}',
 		'.drcom-diag-title{font-weight:600;margin-bottom:4px}',
+		'.drcom-diag-details{margin-top:6px}',
+		'.drcom-diag-details > summary{cursor:pointer;font-weight:600;padding:4px 0}',
 		'.drcom-diag-pre{background:rgba(0,0,0,.55);color:inherit;padding:8px;border-radius:4px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;margin:0}',
 		'.drcom-preview-frame{width:100%;height:160px;border:1px solid rgba(128,128,128,.4);border-radius:4px;background:#fff}',
 		'#drcom-cas-response-box .drcom-body-field{max-height:200px;overflow:auto}',

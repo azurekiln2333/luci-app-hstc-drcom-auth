@@ -96,9 +96,10 @@ return view.extend({
 			}).catch(function(e) {
 				var node = document.getElementById('drcom-authorize-status');
 				var message = h.execMessage(e) || tr('authorizeFailed');
+				var sentence = h.diagSentence(message);
 				if (node)
-					node.textContent = tr('authorizeFailed') + ': ' + message;
-				ui.addNotification(null, E('p', message), 'error');
+					node.textContent = sentence;
+				h.showDiag(tr('authorizeFailed'), message);
 			});
 		};
 
@@ -238,13 +239,16 @@ return view.extend({
 				node.textContent = tr('authRunning');
 			return fs.exec('/etc/init.d/drcom_auth', [ 'ticket' ]).then(function(res) {
 				var node = document.getElementById('drcom-auth-status');
+				var output = (res && res.stdout ? res.stdout : '').trim();
 				var message = h.execMessage(res);
 				var failed = h.execFailed(res, message);
+				var sentence = failed ? h.diagSentence(output || message) : tr('authDone');
 				if (node)
-					node.textContent = failed
-						? (tr('authFailed') + (message ? ': ' + message : ''))
-						: tr('authDone');
-					ui.addNotification(null, E('p', failed ? tr('authFailed') : tr('authDone')), failed ? 'error' : undefined);
+					node.textContent = sentence;
+				if (failed)
+					h.showDiag(tr('authFailed'), output || message);
+				else
+					ui.addNotification(null, E('p', sentence));
 				// Auth changes the session/portal state: keep the status card and
 				// the CAS rows in sync, like the CAS login button does.
 				h.refreshDashboard();
@@ -254,8 +258,8 @@ return view.extend({
 				var node = document.getElementById('drcom-auth-status');
 				var message = h.execMessage(e) || tr('authFailed');
 				if (node)
-					node.textContent = tr('authFailed') + ': ' + message;
-				ui.addNotification(null, E('p', message), 'error');
+					node.textContent = h.diagSentence(message);
+				h.showDiag(tr('authFailed'), message);
 				h.refreshDashboard();
 				h.refreshCasStatus();
 				h.loadCasRequest();

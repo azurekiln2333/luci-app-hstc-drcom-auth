@@ -11,6 +11,14 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 . "$CONFIG_FILE"
 
+# Defensive: also honour the bad-credentials marker here in case this script is
+# invoked outside the periodic check.
+BAD_CREDS_FILE="${BAD_CREDS_FILE:-${COOKIE_DIR:-$SCRIPT_DIR/info}/bad_credentials}"
+if [ -s "$BAD_CREDS_FILE" ]; then
+	output_status "$STATUS_LOG_FILE" "Skipping auto login: bad-credentials marker present."
+	exit 0
+fi
+
 if mkdir "$SCRIPT_DIR/auto_login_and_verify.lock" 2>/dev/null; then
 	trap 'rmdir "$SCRIPT_DIR/auto_login_and_verify.lock"' EXIT INT TERM
 	/bin/sh "$SCRIPT_DIR/auto_login_and_verify.sh"

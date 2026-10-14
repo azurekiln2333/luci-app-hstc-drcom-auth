@@ -95,27 +95,32 @@ return view.extend({
 			var node = document.getElementById('drcom-connect-status');
 			if (node)
 				node.textContent = tr('connectRunning');
-			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_ensure' ]).then(function(res) {
+			// Manual connect is an explicit action: drop the lockout marker first so
+			// the login is actually attempted.
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_clear_bad_credentials' ]).catch(function() {}).then(function() {
+				return fs.exec('/etc/init.d/drcom_auth', [ 'cas_ensure' ]);
+			}).then(function(res) {
 				var node = document.getElementById('drcom-connect-status');
 				var message = h.execMessage(res);
 				var failed = h.execFailed(res, message);
 				if (/^diagnosis=/m.test(message))
 					failed = true;
-				var text = failed ? tr('connectFailed') + (message ? ': ' + message : '')
+				// Only a short sentence here; the raw output lives on the
+				// Diagnostics tab.
+				var text = failed
+					? h.diagSentence(message) + ' ' + tr('diagSeeDiagnostics')
 					: tr('connectDone');
 				if (node)
 					node.textContent = text;
-				if (failed)
-					ui.addNotification(null, E('p', text), 'error');
-				else
-					ui.addNotification(null, E('p', text));
+				ui.addNotification(null, E('p', text), failed ? 'error' : undefined);
 				return h.refreshCasStatus();
 			}).catch(function(e) {
 				var node = document.getElementById('drcom-connect-status');
 				var message = h.execMessage(e) || tr('connectFailed');
+				var text = h.diagSentence(message) + ' ' + tr('diagSeeDiagnostics');
 				if (node)
-					node.textContent = tr('connectFailed') + ': ' + message;
-				ui.addNotification(null, E('p', message), 'error');
+					node.textContent = text;
+				ui.addNotification(null, E('p', text), 'error');
 			});
 		};
 
