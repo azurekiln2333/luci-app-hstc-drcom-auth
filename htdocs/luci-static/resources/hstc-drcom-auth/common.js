@@ -1,10 +1,14 @@
 'use strict';
+'require baseclass';
 'require fs';
 'require ui';
 'require network';
 
 // Shared helpers for the HSTC Dr.COM auth panel tabs. One module so every tab
 // uses the same translations, exec helpers and CAS rendering.
+//
+// LuCI requires a module factory to yield a constructor, so this returns a
+// baseclass instance (like wwand/bands.js) rather than a plain object.
 
 // Collect candidate WAN interfaces: LuCI logical interfaces (with their device)
 // plus raw system netdevs, so the dropdown matches what the router actually has.
@@ -822,9 +826,9 @@ function makeBaseHelpers(tr) {
 	};
 }
 
-return {
+return baseclass.extend({
 	collectInterfaces: collectInterfaces,
 	parseAccounts: parseAccounts,
 	makeTranslator: makeTranslator,
 	makeBaseHelpers: makeBaseHelpers
-};
+});
