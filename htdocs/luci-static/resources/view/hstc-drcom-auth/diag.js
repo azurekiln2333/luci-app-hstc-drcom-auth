@@ -222,17 +222,27 @@ return view.extend({
 			var node = document.getElementById('drcom-auth-status');
 			if (node)
 				node.textContent = tr('authRunning');
-			return fs.exec('/etc/init.d/drcom_auth', [ 'ticket' ]).then(function() {
+			return fs.exec('/etc/init.d/drcom_auth', [ 'ticket' ]).then(function(res) {
 				var node = document.getElementById('drcom-auth-status');
+				var message = h.execMessage(res);
+				var failed = h.execFailed(res, message);
 				if (node)
-					node.textContent = tr('authDone');
-				ui.addNotification(null, E('p', tr('authDone')));
+					node.textContent = failed
+						? (tr('authFailed') + (message ? ': ' + message : ''))
+						: tr('authDone');
+					ui.addNotification(null, E('p', failed ? tr('authFailed') : tr('authDone')), failed ? 'error' : undefined);
+				// Auth changes the session/portal state: keep the status card and
+				// the CAS rows in sync, like the CAS login button does.
+				h.refreshDashboard();
+				h.refreshCasStatus();
 			}).catch(function(e) {
 				var node = document.getElementById('drcom-auth-status');
 				var message = h.execMessage(e) || tr('authFailed');
 				if (node)
 					node.textContent = tr('authFailed') + ': ' + message;
 				ui.addNotification(null, E('p', message), 'error');
+				h.refreshDashboard();
+				h.refreshCasStatus();
 			});
 		};
 
@@ -244,6 +254,7 @@ return view.extend({
 
 		return m.render().then(function(map) {
 			var viewNode = E('div', { 'class': 'drcom-auth-view' }, [ common.style(), map ]);
+			h.refreshDashboard();
 			h.refreshCasStatus();
 			h.loadCasRequest();
 			return viewNode;

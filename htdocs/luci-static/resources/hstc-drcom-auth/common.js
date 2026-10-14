@@ -753,6 +753,21 @@ function makeBaseHelpers(tr) {
 				cookieNode.textContent = (v.cookie === 'valid')
 					? format(tr('statusCookiePresent'), v.COOKIE_MTIME || '?')
 					: tr('statusCookieNone');
+
+			// The Diagnostics tab's authenticate row shows the same real Dr.COM
+			// state, so it is no longer a static "not authenticated".
+			var authNode = document.getElementById('drcom-auth-status');
+			if (authNode) {
+				var am = net.match(/drcom=(\w*)/);
+				var as = am ? am[1] : '';
+				var acct = net.match(/account=(\S+)/);
+				if (as === 'online')
+					authNode.textContent = acct ? format(tr('statusDrcomOnlineAcct'), acct[1]) : tr('statusDrcomOnline');
+				else if (as === 'offline')
+					authNode.textContent = tr('statusDrcomOffline');
+				else
+					authNode.textContent = tr('authIdle');
+			}
 		});
 	}
 
