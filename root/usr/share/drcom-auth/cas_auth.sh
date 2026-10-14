@@ -523,13 +523,16 @@ cmd_portal_status() {
 		uid=""; ip=""; stime=""; etime=""
 	fi
 
-	# Online when the connectivity check passes (204/200) or the portal itself
-	# answered and reports an active account with a future billing end.
+	# The generate_204 probe must return exactly 204 to mean "the internet let us
+	# through". A 200 means the response was rewritten (captive portal / hijack),
+	# which is NOT a successful auth, so only 204 counts as online here.
 	case "$probe_code" in
-		204|200) state=online ;;
+		204) state=online ;;
 		*)
 			state=offline
-			if [ -n "$uid" ] && [ -n "$stime" ]; then
+			# Fall back to the portal's own session fields: a non-empty uid plus a
+			# session end in the future means the portal still holds a session.
+			if [ -n "$uid" ] && [ -n "$stime" ] && [ -n "$etime" ]; then
 				now=$(date '+%s' 2>/dev/null || echo 0)
 				etime_s=$(date -d "$etime" '+%s' 2>/dev/null || echo 0)
 				if [ "$etime_s" -gt 0 ] 2>/dev/null && [ "$etime_s" -gt "$now" ]; then

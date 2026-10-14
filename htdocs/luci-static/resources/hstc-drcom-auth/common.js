@@ -805,8 +805,12 @@ function makeBaseHelpers(tr) {
 				var mres = net.match(/drcom=(\w*)/);
 				var ds = mres ? mres[1] : '';
 				var account = net.match(/account=(\S+)/);
-				if (ds === 'online')
-					drcomNode.textContent = account ? format(tr('statusDrcomOnlineAcct'), account[1]) : tr('statusDrcomOnline');
+				// Do not claim online when the portal reported no account: that
+				// combination is contradictory and means the state is unclear.
+				if (ds === 'online' && account)
+					drcomNode.textContent = format(tr('statusDrcomOnlineAcct'), account[1]);
+				else if (ds === 'online')
+					drcomNode.textContent = tr('statusUnknown');
 				else if (ds === 'offline')
 					drcomNode.textContent = tr('statusDrcomOffline');
 				else

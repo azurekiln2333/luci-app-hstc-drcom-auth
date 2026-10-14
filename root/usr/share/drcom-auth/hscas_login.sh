@@ -114,14 +114,25 @@ fi
 
 # The CAS server expects the password RSA-encrypted with PKCS#1 v1.5 padding and
 # base64-encoded, prefixed with __RSA__.
+#
+# Base64-encode stdin. Prefer a `base64` command, fall back to `openssl base64`;
+# some stripped-down images ship neither coreutils-base64 nor busybox base64.
+cas_base64() {
+	if command -v base64 >/dev/null 2>&1; then
+		base64 | tr -d '\r\n'
+	else
+		openssl base64 -A 2>/dev/null | tr -d '\r\n'
+	fi
+}
+
 encrypt_password() {
 	local encrypted
-	if encrypted=$(printf "%s" "$PASSWORD" | openssl pkeyutl -encrypt -pubin -inkey "$PUBLIC_KEY_FILE" -pkeyopt rsa_padding_mode:pkcs1 2>/dev/null | base64 | tr -d '\r\n'); then
+	if encrypted=$(printf "%s" "$PASSWORD" | openssl pkeyutl -encrypt -pubin -inkey "$PUBLIC_KEY_FILE" -pkeyopt rsa_padding_mode:pkcs1 2>/dev/null | cas_base64); then
 		printf "%s\n" "__RSA__$encrypted"
 		return 0
 	fi
 
-	if encrypted=$(printf "%s" "$PASSWORD" | openssl rsautl -encrypt -pubin -inkey "$PUBLIC_KEY_FILE" -pkcs 2>/dev/null | base64 | tr -d '\r\n'); then
+	if encrypted=$(printf "%s" "$PASSWORD" | openssl rsautl -encrypt -pubin -inkey "$PUBLIC_KEY_FILE" -pkcs 2>/dev/null | cas_base64); then
 		printf "%s\n" "__RSA__$encrypted"
 		return 0
 	fi

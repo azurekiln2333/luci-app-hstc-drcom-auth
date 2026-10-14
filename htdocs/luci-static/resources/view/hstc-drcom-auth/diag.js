@@ -42,8 +42,12 @@ return view.extend({
 					if (eq > 0) v[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
 				});
 				if (status) {
-					if (v.portal === 'online')
-						status.textContent = v.portal_uid ? h.format(tr('statusDrcomOnlineAcct'), v.portal_uid) : tr('statusDrcomOnline');
+					// Defensive: an "online" verdict without an account is not a
+					// usable state, so do not claim online with empty fields.
+					if (v.portal === 'online' && v.portal_uid)
+						status.textContent = h.format(tr('statusDrcomOnlineAcct'), v.portal_uid);
+					else if (v.portal === 'online')
+						status.textContent = tr('statusDrcomOnline');
 					else if (v.portal === 'offline')
 						status.textContent = tr('statusDrcomOffline');
 					else
