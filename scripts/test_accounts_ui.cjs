@@ -1,7 +1,7 @@
 // Sanity-check the accounts editor config value by exercising the same row
 // builder logic that cfgvalue uses, and verifying required hooks exist.
 const fs = require('fs');
-const src = fs.readFileSync(__dirname + '/../htdocs/luci-static/resources/view/drcom-auth.js', 'utf8');
+const src = fs.readFileSync(__dirname + '/../htdocs/luci-static/resources/view/hstc-drcom-auth/accounts.js', 'utf8');
 
 const need = ['drcom-accounts-editor', 'drcom-acc-new-user',
   'drcom-acc-new-pass', 'drcom-acc-save', 'data-acc-del', 'drcom-active-account',

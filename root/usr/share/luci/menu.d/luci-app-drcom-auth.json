@@ -1,12 +1,44 @@
 {
-	"admin/services/drcom-auth": {
+	"admin/services/hstc-drcom-auth": {
 		"title": "Dr.COM",
+		"order": 30,
 		"action": {
-			"type": "view",
-			"path": "drcom-auth"
+			"type": "firstchild"
 		},
 		"depends": {
 			"acl": [ "luci-app-drcom-auth" ]
+		}
+	},
+	"admin/services/hstc-drcom-auth/online": {
+		"title": "Online Auth",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "hstc-drcom-auth/online"
+		}
+	},
+	"admin/services/hstc-drcom-auth/accounts": {
+		"title": "Accounts",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "hstc-drcom-auth/accounts"
+		}
+	},
+	"admin/services/hstc-drcom-auth/diag": {
+		"title": "Diagnostics",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "hstc-drcom-auth/diag"
+		}
+	},
+	"admin/services/hstc-drcom-auth/settings": {
+		"title": "Settings",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "hstc-drcom-auth/settings"
 		}
 	}
 }

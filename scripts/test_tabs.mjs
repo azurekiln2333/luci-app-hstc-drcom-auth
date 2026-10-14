@@ -1,60 +1,38 @@
-// Verify the tab grouping: which section title lands in which tab, for every
-// language. Parses the tabs config and the dict titles out of the view file.
+// Verify the native tab layout: the menu registers a firstchild parent with
+// four child views, and each tab view file exists and is syntactically sane
+// (checked separately by node --check).
 import fs from 'node:fs';
+import assert from 'node:assert';
 
-const src = fs.readFileSync(new URL('../htdocs/luci-static/resources/view/drcom-auth.js', import.meta.url), 'utf8');
+const menuPath = new URL('../root/usr/share/luci/menu.d/luci-app-drcom-auth.json', import.meta.url);
+const menu = JSON.parse(fs.readFileSync(menuPath, 'utf8'));
 
-// Section definition order and their tr() key.
-const sectionKeys = [...src.matchAll(/m\.section\(form\.TypedSection, 'drcom_auth', tr\('([a-zA-Z]+)'\)\)/g)]
-  .map((m) => m[1]);
-console.log('sections in order:', sectionKeys.join(', '));
-console.log();
+const parent = menu['admin/services/hstc-drcom-auth'];
+assert(parent, 'parent menu entry exists');
+assert.equal(parent.action.type, 'firstchild', 'parent is firstchild');
 
-// Extract each language dict's relevant titles.
-function dict(lang) {
-  // crude: pull the block for the language and read basic/account/network/authorize/cas/auth/settings/server
-  const keys = ['basic', 'account', 'network', 'authorize', 'cas', 'auth', 'settings', 'server',
-    'status', 'accountsTab', 'tabOnline', 'tabAccounts', 'tabDiag', 'tabSettings'];
-  const out = {};
-  // find the lang object start
-  let start;
-  if (lang === 'zh') start = src.indexOf('\t\t\tzh: {');
-  else if (lang === 'zh-tw') start = src.indexOf("\t\t\t'zh-tw': {");
-  else start = src.indexOf('\t\t\ten: {');
-  const block = src.slice(start, start + 6000);
-  for (const k of keys) {
-    const m = block.match(new RegExp(`\\b${k}:\\s*'([^']*)'`));
-    out[k] = m ? m[1] : '(missing)';
-  }
-  return out;
+const tabs = ['online', 'accounts', 'diag', 'settings'];
+for (const t of tabs) {
+  const key = `admin/services/hstc-drcom-auth/${t}`;
+  assert(menu[key], `child ${t} exists`);
+  assert.equal(menu[key].action.type, 'view', `child ${t} is a view`);
+  assert.equal(menu[key].action.path, `hstc-drcom-auth/${t}`, `child ${t} path`);
+  const view = new URL(`../htdocs/luci-static/resources/view/hstc-drcom-auth/${t}.js`, import.meta.url);
+  assert(fs.existsSync(view), `view file ${t}.js exists`);
 }
 
-const tabs = {
-  online: ['status', 'account', 'basic', 'network'],
-  accounts: ['accountsTab'],
-  diag: ['authorize', 'cas', 'auth'],
-  settings: ['settings', 'server']
-};
-
-let fail = 0;
-for (const lang of ['zh', 'zh-tw', 'en']) {
-  const d = dict(lang);
-  console.log(`--- ${lang} ---`);
-  console.log(`  tabs: ${d.tabOnline} / ${d.tabDiag} / ${d.tabSettings}`);
-  const assigned = [];
-  for (const [tab, keys] of Object.entries(tabs)) {
-    for (const k of keys) {
-      assigned.push(k);
-      console.log(`  ${tab.padEnd(8)} <- ${d[k]}`);
-    }
-  }
-  // every section must be assigned exactly once
-  const missing = sectionKeys.filter((k) => !assigned.includes(k));
-  const dup = assigned.filter((k, i) => assigned.indexOf(k) !== i);
-  if (missing.length) { console.log(`  FAIL unassigned: ${missing.join(', ')}`); fail++; }
-  if (dup.length) { console.log(`  FAIL duplicated: ${dup.join(', ')}`); fail++; }
-  if (!missing.length && !dup.length) console.log('  OK all sections assigned once');
-  console.log();
+// No custom tab bar remains anywhere in the view modules.
+const dir = new URL('../htdocs/luci-static/resources/view/hstc-drcom-auth/', import.meta.url);
+for (const f of fs.readdirSync(dir)) {
+  const src = fs.readFileSync(new URL(f, dir), 'utf8');
+  assert(!src.includes('drcom-tab-btn'), `${f} has no custom tab button`);
+  assert(!src.includes('drcom-tabs-nav'), `${f} has no custom tab nav`);
 }
-console.log(fail ? `FAILURES: ${fail}` : 'ALL OK');
-process.exit(fail ? 1 : 0);
+
+// The shared module exposes what the tabs require.
+const common = fs.readFileSync(new URL('common.js', dir), 'utf8');
+for (const sym of ['makeTranslator', 'makeBaseHelpers', 'collectInterfaces', 'parseAccounts', 'style'])
+  assert(common.includes(sym), `common exports ${sym}`);
+
+console.log('tabs order:', tabs.join(' -> '));
+console.log('ALL OK');
