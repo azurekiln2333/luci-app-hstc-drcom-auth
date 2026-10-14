@@ -104,7 +104,8 @@ function Test-IsTextPackagePath {
         -or $unix -like "usr/share/drcom-auth/config.sh.template" `
         -or $unix -like "usr/share/luci/menu.d/*.json" `
         -or $unix -like "usr/share/rpcd/acl.d/*.json" `
-        -or $unix -like "www/luci-static/resources/view/*"
+        -or $unix -like "www/luci-static/resources/view/*" `
+        -or $unix -like "www/luci-static/resources/hstc-drcom-auth/*"
 }
 
 $packageRootPath = Resolve-Path -LiteralPath $PackageRoot
@@ -126,7 +127,8 @@ $dirs = @(
     "./usr/share/rpcd/", "./usr/share/rpcd/acl.d/",
     "./www/", "./www/luci-static/", "./www/luci-static/resources/",
     "./www/luci-static/resources/view/",
-    "./www/luci-static/resources/view/hstc-drcom-auth/"
+    "./www/luci-static/resources/view/hstc-drcom-auth/",
+    "./www/luci-static/resources/hstc-drcom-auth/"
 )
 $dataEntries = @()
 foreach ($d in $dirs) { $dataEntries += @{ Name = $d; Type = "dir"; Mode = 755 } }

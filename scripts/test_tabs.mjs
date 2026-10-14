@@ -29,8 +29,9 @@ for (const f of fs.readdirSync(dir)) {
   assert(!src.includes('drcom-tabs-nav'), `${f} has no custom tab nav`);
 }
 
-// The shared module exposes what the tabs require.
-const common = fs.readFileSync(new URL('common.js', dir), 'utf8');
+// The shared module lives next to view/ (require hstc-drcom-auth.common) and
+// exposes what the tab views require.
+const common = fs.readFileSync(new URL('../htdocs/luci-static/resources/hstc-drcom-auth/common.js', import.meta.url), 'utf8');
 for (const sym of ['makeTranslator', 'makeBaseHelpers', 'collectInterfaces', 'parseAccounts', 'style'])
   assert(common.includes(sym), `common exports ${sym}`);
 
