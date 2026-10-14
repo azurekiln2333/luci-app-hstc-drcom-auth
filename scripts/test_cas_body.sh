@@ -24,7 +24,7 @@ HSCAS_PUBLIC_KEY_URL="https://hscas.hstc.edu.cn/cas/jwt/publicKey"
 USERNAME="${USERNAME:?}"; PASSWORD="${PASSWORD:?}"
 LOG_DIR="$TMP/logs"; LOG_FILE="$TMP/logs/a.txt"; STATUS_LOG_FILE="$TMP/logs/s.txt"
 COOKIE_DIR="$TMP/app/info"; CAS_COOKIE_FILE="$COOKIE_DIR/cas_cookie.txt"
-CAS_PARAMS_FILE="$COOKIE_DIR/cas_params.env"; CAS_PUBLIC_KEY_FILE="$COOKIE_DIR/public_key.pem"
+CAS_PARAMS_FILE="$COOKIE_DIR/cas_params.env"; CAS_PUBLIC_KEY_FILE="$TMP/app/info/public_key.pem"
 DEFAULT_PUBLIC_KEY_FILE="$TMP/app/public_key.pem"; RESPONSE_DIR="$TMP/app/responses"
 CAS_HEADERS="$COOKIE_DIR/cas_headers.txt"; CAS_POST_BODY="$RESPONSE_DIR/cas_post_response.html"
 output_status() { mkdir -p "\$(dirname "\$1")"; echo "\$(date): \$2" >> "\$1"; }

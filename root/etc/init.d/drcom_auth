@@ -328,7 +328,7 @@ public_key() {
 
 	write_config
 	. "$CONFIG_FILE"
-	mkdir -p "$COOKIE_DIR"
+	mkdir -p "$COOKIE_DIR" "$(dirname "$PUBLIC_KEY_FILE")"
 	tmp="$PUBLIC_KEY_FILE.tmp"
 
 	code=$(curl -L -H "User-Agent: $USER_AGENT" -s -o "$tmp" -w "%{http_code}" "$HSCAS_PUBLIC_KEY_URL")

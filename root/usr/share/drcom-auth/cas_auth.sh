@@ -45,7 +45,8 @@ COOKIE_DIR="${COOKIE_DIR:-${SCRIPT_DIR:-/usr/share/drcom-auth}/info}"
 RESPONSE_DIR="${RESPONSE_DIR:-${SCRIPT_DIR:-/usr/share/drcom-auth}/responses}"
 CAS_COOKIE_FILE="${CAS_COOKIE_FILE:-$COOKIE_DIR/cas_cookie.txt}"
 CAS_PARAMS_FILE="${CAS_PARAMS_FILE:-$COOKIE_DIR/cas_params.env}"
-CAS_PUBLIC_KEY_FILE="${CAS_PUBLIC_KEY_FILE:-$COOKIE_DIR/public_key.pem}"
+# The CAS public key is global (one value per CAS server), not per account.
+CAS_PUBLIC_KEY_FILE="${CAS_PUBLIC_KEY_FILE:-${SCRIPT_DIR:-/usr/share/drcom-auth}/info/public_key.pem}"
 DEFAULT_PUBLIC_KEY_FILE="${DEFAULT_PUBLIC_KEY_FILE:-${SCRIPT_DIR:-/usr/share/drcom-auth}/public_key.pem}"
 CAS_LOGIN_PAGE="${CAS_LOGIN_PAGE:-$RESPONSE_DIR/cas_login_page.html}"
 CAS_POST_BODY="${CAS_POST_BODY:-$RESPONSE_DIR/cas_post_response.html}"
@@ -243,6 +244,33 @@ cas_base64() {
 	fi
 }
 
+# Ensure the global public key exists, migrating a legacy per-account copy on
+# first use. The old file is left in place so nothing is lost.
+migrate_public_key() {
+	local legacy
+
+	[ -s "$CAS_PUBLIC_KEY_FILE" ] && return 0
+
+	mkdir -p "$(dirname "$CAS_PUBLIC_KEY_FILE")"
+
+	# Legacy layout: the key used to live inside the active account's dir.
+	legacy="${COOKIE_DIR:-}/public_key.pem"
+	if [ -n "${COOKIE_DIR:-}" ] && [ -s "$legacy" ] && [ "$legacy" != "$CAS_PUBLIC_KEY_FILE" ]; then
+		cp "$legacy" "$CAS_PUBLIC_KEY_FILE"
+		chmod 600 "$CAS_PUBLIC_KEY_FILE"
+		return 0
+	fi
+
+	# Fall back to the copy bundled with the package.
+	if [ -s "$DEFAULT_PUBLIC_KEY_FILE" ]; then
+		cp "$DEFAULT_PUBLIC_KEY_FILE" "$CAS_PUBLIC_KEY_FILE"
+		chmod 600 "$CAS_PUBLIC_KEY_FILE"
+		return 0
+	fi
+
+	return 1
+}
+
 # --- step 3+4: RSA-encrypt the password and POST ----------------------------
 rsa_encrypt_password() {
 	local encrypted
@@ -252,10 +280,8 @@ rsa_encrypt_password() {
 		return 1
 	fi
 
-	if [ ! -s "$CAS_PUBLIC_KEY_FILE" ] && [ -s "$DEFAULT_PUBLIC_KEY_FILE" ]; then
-		cp "$DEFAULT_PUBLIC_KEY_FILE" "$CAS_PUBLIC_KEY_FILE"
-		chmod 600 "$CAS_PUBLIC_KEY_FILE"
-	fi
+	# Global key, migrating a legacy per-account file when present.
+	migrate_public_key
 
 	if [ ! -s "$CAS_PUBLIC_KEY_FILE" ]; then
 		cas_log "fetching RSA public key from $HSCAS_PUBLIC_KEY_URL"

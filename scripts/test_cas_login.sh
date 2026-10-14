@@ -31,7 +31,7 @@ STATUS_LOG_FILE="$LOG_DIR/drcom_status_log.txt"
 COOKIE_DIR="$TMP/app/info"
 CAS_COOKIE_FILE="$COOKIE_DIR/cas_cookie.txt"
 CAS_PARAMS_FILE="$COOKIE_DIR/cas_params.env"
-CAS_PUBLIC_KEY_FILE="$COOKIE_DIR/public_key.pem"
+CAS_PUBLIC_KEY_FILE="$TMP/app/info/public_key.pem"
 DEFAULT_PUBLIC_KEY_FILE="$TMP/app/public_key.pem"
 RESPONSE_DIR="$TMP/app/responses"
 output_status() { mkdir -p "\$(dirname "\$1")"; echo "\$(date): \$2" >> "\$1"; }

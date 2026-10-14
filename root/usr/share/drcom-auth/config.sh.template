@@ -58,16 +58,19 @@ STATUS_LOG_FILE="$LOG_DIR/drcom_status_log.txt"
 ACCOUNT_ID="__ACCOUNT_ID__"
 ACCOUNTS="__ACCOUNT_IDS__"
 
-# Dr.COM-chain state is shared, but the CAS state below it is per account.
+# Dr.COM-chain and CAS state is per account, but the CAS RSA public key is a
+# single global value (same HSCAS_PUBLIC_KEY_URL for every account), so it is
+# stored once under info/ and shared by all accounts.
 COOKIE_DIR="$SCRIPT_DIR/info/accounts/$ACCOUNT_ID"
 COOKIE_FILE="$COOKIE_DIR/cookie.txt"
 HEADERS_FILE="$COOKIE_DIR/headers.txt"
-# Dr.COM-chain public key (used by hscas_login.sh).
-PUBLIC_KEY_FILE="$COOKIE_DIR/public_key.pem"
+# Global CAS public key (used by hscas_login.sh and cas_auth.sh).
+PUBLIC_KEY_FILE="$SCRIPT_DIR/info/public_key.pem"
 # Standalone CAS state (used by cas_auth.sh).
 CAS_COOKIE_FILE="$COOKIE_DIR/cas_cookie.txt"
 CAS_PARAMS_FILE="$COOKIE_DIR/cas_params.env"
-CAS_PUBLIC_KEY_FILE="$COOKIE_DIR/public_key.pem"
+CAS_PUBLIC_KEY_FILE="$SCRIPT_DIR/info/public_key.pem"
+# Bundled fallback copy shipped with the package.
 DEFAULT_PUBLIC_KEY_FILE="$SCRIPT_DIR/public_key.pem"
 
 RESPONSE_DIR="$SCRIPT_DIR/responses"

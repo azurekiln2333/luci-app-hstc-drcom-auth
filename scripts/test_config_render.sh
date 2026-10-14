@@ -37,5 +37,10 @@ logger() { :; }
 [ "$ACCOUNT_ID" = "acc1" ] || { echo "FAIL ACCOUNT_ID"; exit 1; }
 [ "$ACCOUNTS" = "acc1 acc2" ] || { echo "FAIL ACCOUNTS"; exit 1; }
 case "$COOKIE_DIR" in *"/accounts/acc1") ;; *) echo "FAIL COOKIE_DIR per-account: $COOKIE_DIR"; exit 1 ;; esac
+# The CAS public key must be global, not inside the per-account directory.
+[ "$CAS_PUBLIC_KEY_FILE" = "$APP_DIR/info/public_key.pem" ] || { echo "FAIL CAS_PUBLIC_KEY_FILE not global: $CAS_PUBLIC_KEY_FILE"; exit 1; }
+[ "$PUBLIC_KEY_FILE" = "$APP_DIR/info/public_key.pem" ] || { echo "FAIL PUBLIC_KEY_FILE not global: $PUBLIC_KEY_FILE"; exit 1; }
+case "$CAS_PUBLIC_KEY_FILE" in *"/accounts/") echo "FAIL key under accounts dir"; exit 1 ;; esac
+case "$PUBLIC_KEY_FILE" in *"/accounts/") echo "FAIL key under accounts dir"; exit 1 ;; esac
 
 echo "OK: render + roundtrip of special characters succeeded"

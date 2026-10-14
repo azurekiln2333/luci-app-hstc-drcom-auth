@@ -219,9 +219,11 @@ return view.extend({
 		o.onclick = function() {
 			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_logout' ]).then(function() {
 				ui.addNotification(null, E('p', tr('casLogoutDone')));
+				h.clearCasOutput();
 				return h.refreshCasStatus();
 			}).catch(function(e) {
 				h.showDiag(tr('casLogout'), h.execMessage(e));
+				h.clearCasOutput();
 				return h.refreshCasStatus();
 			});
 		};
@@ -252,6 +254,7 @@ return view.extend({
 				// the CAS rows in sync, like the CAS login button does.
 				h.refreshDashboard();
 				h.refreshCasStatus();
+				h.loadCasRequest();
 			}).catch(function(e) {
 				var node = document.getElementById('drcom-auth-status');
 				var message = h.execMessage(e) || tr('authFailed');
@@ -260,6 +263,7 @@ return view.extend({
 				ui.addNotification(null, E('p', message), 'error');
 				h.refreshDashboard();
 				h.refreshCasStatus();
+				h.loadCasRequest();
 			});
 		};
 

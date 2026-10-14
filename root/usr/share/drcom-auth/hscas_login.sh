@@ -89,9 +89,18 @@ CURRENT_MENU=${CURRENT_MENU:-1}
 FAIL_N=${FAIL_N:-0}
 EVENT_ID=${EVENT_ID:-submit}
 
-if [ ! -s "$PUBLIC_KEY_FILE" ] && [ -s "$DEFAULT_PUBLIC_KEY_FILE" ]; then
-	cp "$DEFAULT_PUBLIC_KEY_FILE" "$PUBLIC_KEY_FILE"
-	chmod 600 "$PUBLIC_KEY_FILE"
+# Ensure the global public key exists, migrating a legacy per-account copy on
+# first use. The old file is left in place so nothing is lost.
+if [ ! -s "$PUBLIC_KEY_FILE" ]; then
+	mkdir -p "$(dirname "$PUBLIC_KEY_FILE")"
+	LEGACY_KEY="${COOKIE_DIR:-}/public_key.pem"
+	if [ -n "${COOKIE_DIR:-}" ] && [ -s "$LEGACY_KEY" ] && [ "$LEGACY_KEY" != "$PUBLIC_KEY_FILE" ]; then
+		cp "$LEGACY_KEY" "$PUBLIC_KEY_FILE"
+		chmod 600 "$PUBLIC_KEY_FILE"
+	elif [ -s "$DEFAULT_PUBLIC_KEY_FILE" ]; then
+		cp "$DEFAULT_PUBLIC_KEY_FILE" "$PUBLIC_KEY_FILE"
+		chmod 600 "$PUBLIC_KEY_FILE"
+	fi
 fi
 
 if [ ! -s "$PUBLIC_KEY_FILE" ]; then
