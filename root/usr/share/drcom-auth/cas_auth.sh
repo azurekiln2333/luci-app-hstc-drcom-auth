@@ -50,6 +50,14 @@ DEFAULT_PUBLIC_KEY_FILE="${DEFAULT_PUBLIC_KEY_FILE:-${SCRIPT_DIR:-/usr/share/drc
 CAS_LOGIN_PAGE="${CAS_LOGIN_PAGE:-$RESPONSE_DIR/cas_login_page.html}"
 CAS_POST_BODY="${CAS_POST_BODY:-$RESPONSE_DIR/cas_post_response.html}"
 CAS_HEADERS="${CAS_HEADERS:-$COOKIE_DIR/cas_headers.txt}"
+# Dr.COM chain artifacts (produced by hscas_login.sh / get_authorize_url.sh).
+DEFAULT_HEADERS_FILE="${HEADERS_FILE:-$COOKIE_DIR/headers.txt}"
+AUTHZ_RESPONSE="${AUTHZ_RESPONSE:-$RESPONSE_DIR/authorize_response.json}"
+AUTHZ_HEADERS="${AUTHZ_HEADERS:-$COOKIE_DIR/authorize_headers.txt}"
+CAS_LOGIN_PAGE_DRCOM="${LOGIN_PAGE_CONTENT:-$RESPONSE_DIR/login_page.html}"
+POST_RESPONSE_FILE="${POST_RESPONSE_CONTENT:-$RESPONSE_DIR/post_response.html}"
+GET_RESPONSE_FILE="${GET_RESPONSE_CONTENT:-$RESPONSE_DIR/get_response.html}"
+THIRD_RESPONSE_FILE="${THIRD_GET_RESPONSE_CONTENT:-$RESPONSE_DIR/third_get_response.html}"
 STATUS_LOG_FILE="${STATUS_LOG_FILE:-${SCRIPT_DIR:-/usr/share/drcom-auth}/logs/drcom_status_log.txt}"
 USER_AGENT="${USER_AGENT:-Mozilla/5.0}"
 
@@ -548,6 +556,35 @@ cmd_last_response() {
 	head -c 8192 "$CAS_LAST_RESPONSE" 2>/dev/null
 }
 
+# Dr.COM auth chain trace: for each stage report the saved status-code / response
+# headers and a capped body so the Diagnostics panel can show how the flow was
+# diagnosed. Stages are emitted as "---stage---" blocks.
+cmd_auth_trace() {
+	_section() {
+		printf '\n===== %s =====\n' "$1"
+		if [ -s "$2" ]; then
+			head -c 4096 "$2" 2>/dev/null
+		else
+			printf '(none)\n'
+		fi
+	}
+
+	printf 'trace_status_log=%s\n' "$STATUS_LOG_FILE"
+	if [ -s "$STATUS_LOG_FILE" ]; then
+		printf '\n===== status_log (tail) =====\n'
+		tail -n 40 "$STATUS_LOG_FILE" 2>/dev/null
+	fi
+
+	_section "authorize response" "$AUTHZ_RESPONSE"
+	_section "authorize headers" "$AUTHZ_HEADERS"
+	_section "CAS login page" "$CAS_LOGIN_PAGE_DRCOM"
+	_section "CAS POST headers" "$DEFAULT_HEADERS_FILE"
+	_section "CAS POST response" "$POST_RESPONSE_FILE"
+	_section "ticket GET response" "$GET_RESPONSE_FILE"
+	_section "ticket verify response" "$THIRD_RESPONSE_FILE"
+	printf '\n===== end =====\n'
+}
+
 # --- sub-commands -----------------------------------------------------------
 cmd_params() {
 	local rc
@@ -703,8 +740,9 @@ case "$CMD" in
 	logout) cmd_logout ;;
 	portal_status) cmd_portal_status ;;
 	last_response) cmd_last_response ;;
+	auth_trace) cmd_auth_trace ;;
 	*)
-		echo "usage: $0 {params|body|request|login|status|ensure|logout|portal_status|last_response}" >&2
+		echo "usage: $0 {params|body|request|login|status|ensure|logout|portal_status|last_response|auth_trace}" >&2
 		exit 2
 		;;
 esac

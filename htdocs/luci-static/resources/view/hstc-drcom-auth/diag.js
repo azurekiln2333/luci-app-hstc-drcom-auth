@@ -252,6 +252,40 @@ return view.extend({
 			return '<span id="drcom-auth-status">' + tr('authIdle') + '</span>';
 		};
 
+		// Trace of the Dr.COM auth chain (status log + each stage's response and
+		// headers) so it is visible how the authentication was diagnosed.
+		o = s.option(form.Button, '_auth_trace', tr('authTrace'));
+		o.inputtitle = tr('showAuthTrace');
+		o.inputstyle = 'apply';
+		o.onclick = function() {
+			var box = document.getElementById('drcom-auth-trace-box');
+			var status = document.getElementById('drcom-auth-trace-status');
+			if (status)
+				status.textContent = tr('authTraceLoading');
+			if (box)
+				box.style.display = 'none';
+			return fs.exec('/etc/init.d/drcom_auth', [ 'auth_trace' ]).then(function(res) {
+				var text = (res && res.stdout ? res.stdout : '').trim();
+				if (status)
+					status.textContent = '';
+				if (text)
+					h.renderAuthTrace(text);
+				else
+					h.showDiag(tr('authTrace'), h.execMessage(res) || tr('authTraceEmpty'));
+			}).catch(function(e) {
+				if (status)
+					status.textContent = '';
+				h.showDiag(tr('authTrace'), h.execMessage(e));
+			});
+		};
+
+		o = s.option(form.DummyValue, '_auth_trace_status', '');
+		o.rawhtml = true;
+		o.cfgvalue = function() {
+			return '<span id="drcom-auth-trace-status" class="drcom-result"></span>' +
+				'<div id="drcom-auth-trace-box" class="drcom-body-box" style="display:none"></div>';
+		};
+
 		return m.render().then(function(map) {
 			var viewNode = E('div', { 'class': 'drcom-auth-view' }, [ common.style(), map ]);
 			h.refreshDashboard();

@@ -178,7 +178,11 @@ function parseAccounts(raw) {
 				auth: '认证',
 				authStatus: '认证状态',
 				authIdle: '未认证',
-				authRunning: '认证中...',
+				authTrace: '认证诊断',
+				showAuthTrace: '查看认证诊断',
+				authTraceLoading: '读取中...',
+				authTraceEmpty: '暂无认证记录，请先执行认证。',
+				authTraceSummary: '状态日志',				authRunning: '认证中...',
 				authDone: '已执行认证。',
 				authFailed: '认证失败',
 				enable: '启用联网检测',
@@ -307,6 +311,11 @@ function parseAccounts(raw) {
 				auth: '認證',
 				authStatus: '認證狀態',
 				authIdle: '未認證',
+				authTrace: '認證診斷',
+				showAuthTrace: '檢視認證診斷',
+				authTraceLoading: '讀取中...',
+				authTraceEmpty: '尚無認證記錄，請先執行認證。',
+				authTraceSummary: '狀態日誌',
 				authRunning: '認證中...',
 				authDone: '已執行認證。',
 				authFailed: '認證失敗',
@@ -436,6 +445,11 @@ function parseAccounts(raw) {
 				auth: 'Authenticate',
 				authStatus: 'Authentication Status',
 				authIdle: 'Not authenticated',
+				authTrace: 'Auth Diagnostics',
+				showAuthTrace: 'Show Auth Diagnostics',
+				authTraceLoading: 'Loading...',
+				authTraceEmpty: 'No auth record yet - run authenticate first.',
+				authTraceSummary: 'Status Log',
 				authRunning: 'Authenticating...',
 				authDone: 'Authentication executed.',
 				authFailed: 'Authentication failed',
@@ -673,6 +687,41 @@ function makeBaseHelpers(tr) {
 		box.style.display = '';
 	}
 
+	// Render the Dr.COM auth chain trace: one copyable row per "===== stage ====="
+	// block (status log plus each stage's response/headers).
+	function renderAuthTrace(raw) {
+		var box = document.getElementById('drcom-auth-trace-box');
+		if (!box)
+			return;
+		var text = String(raw || '').replace(/\r/g, '').trim();
+		if (!text) {
+			box.innerHTML = '';
+			box.style.display = 'none';
+			return;
+		}
+		var header = '';
+		var hIdx = text.indexOf('\n===== ');
+		if (hIdx > 0) {
+			header = text.slice(0, hIdx).trim();
+			text = text.slice(hIdx + 1);
+		}
+		box.innerHTML = '';
+		if (header)
+			box.appendChild(casFieldRow(tr('authTraceSummary'), header));
+		text.split(/^===== /m).forEach(function (block) {
+			block = block.replace(/\n?=====$/, '').trim();
+			if (!block)
+				return;
+			var nl = block.indexOf('\n');
+			var title = nl >= 0 ? block.slice(0, nl).replace(/\s*=====\s*$/, '').trim() : block;
+			var body = nl >= 0 ? block.slice(nl + 1).trim() : '';
+			if (!title)
+				return;
+			box.appendChild(casFieldRow(title, body));
+		});
+		box.style.display = '';
+	}
+
 	// Read the CAS status and update the params / cookie rows.
 	function refreshCasStatus() {
 		return fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).then(function (res) {
@@ -800,6 +849,7 @@ function makeBaseHelpers(tr) {
 		casFieldRow: casFieldRow,
 		copyToClipboard: copyToClipboard,
 		showDiag: showDiag,
+		renderAuthTrace: renderAuthTrace,
 		renderCasRequest: renderCasRequest,
 		renderCasResponse: renderCasResponse,
 		refreshCasStatus: refreshCasStatus,
