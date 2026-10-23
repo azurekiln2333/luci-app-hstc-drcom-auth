@@ -1,13 +1,13 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-drcom-auth
-PKG_VERSION:=2.3.1
+PKG_VERSION:=2.4.0
 PKG_RELEASE:=1
 
 LUCI_TITLE:=LuCI panel for HSTC Dr.COM authentication
 LUCI_DESCRIPTION:=Standalone LuCI panel that configures and drives the HSTC \
 	Dr.COM captive-portal authentication flow (CAS ticket login).
-LUCI_DEPENDS:=+curl +openssl-util
+LUCI_DEPENDS:=+curl +openssl-util +jsonfilter +ca-bundle +flock
 LUCI_PKGARCH:=all
 
 define Package/$(PKG_NAME)/conffiles
@@ -45,8 +45,12 @@ define Package/$(PKG_NAME)/postinst
 	ensure_default mac_type 2
 	ensure_default check_interval 60
 	ensure_default ping_host baidu.com
+	ensure_default auto_update 0
+	ensure_default update_hour 4
+	ensure_default update_minute 0
 
 	uci -q commit drcom_auth
+	[ ! -x /etc/init.d/drcom_auth ] || /etc/init.d/drcom_auth update_schedule || true
 	rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache 2>/dev/null || true
 }
 exit 0

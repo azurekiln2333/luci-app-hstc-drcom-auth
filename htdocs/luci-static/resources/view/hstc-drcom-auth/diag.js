@@ -45,9 +45,9 @@ return view.extend({
 		// Query the Dr.COM portal state and render the decision details: the
 		// connectivity probe result and the uid/ip/session fields that were read,
 		// so it is visible how "authenticated" was decided.
-		var runAuthCheck = function() {
-			var status = document.getElementById('drcom-auth-status');
-			var box = document.getElementById('drcom-auth-detail');
+		var runAuthCheck = function(scope) {
+			var status = scope ? scope.querySelector('#drcom-auth-status') : document.getElementById('drcom-auth-status');
+			var box = scope ? scope.querySelector('#drcom-auth-detail') : document.getElementById('drcom-auth-detail');
 			if (status)
 				status.textContent = tr('authChecking');
 			if (box)
@@ -375,8 +375,8 @@ return view.extend({
 
 			h.refreshDashboard();
 			refreshDiagnosticCas();
-			// Run the verdict check once on open so the detail is populated.
-			runAuthCheck();
+			// This tree is still detached here; use its nodes for the first check.
+			runAuthCheck(viewNode);
 			return viewNode;
 		});
 	}

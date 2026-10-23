@@ -15,6 +15,7 @@ Portal + CAS 票证认证流程。
 - 完整 Dr.COM 认证链（authorize → CAS → ticket → verify）
 - HSCAS 公钥拉取 / 缓存 / 状态显示
 - 联网检测（定时 ping，掉线自动重连）
+- 设置页检查插件新版本、立即安装，以及每天定时自动检查并安装正式 Release
 - 中文简体 / 中文繁体 / English 三语言界面
 
 ## 独立 CAS 认证说明
@@ -102,15 +103,57 @@ make package/luci-app-drcom-auth/compile V=s
 ### Windows 一键打包 ipk
 
 ```powershell
-pwsh ./scripts/package_ipk.ps1 -Version 1.0.0-1
+pwsh ./scripts/package_ipk.ps1
 ```
 
 产物位于 `release/luci-app-drcom-auth_<version>_all.ipk` 及同名 `.sha256.txt`。
+默认版本从 `Makefile` 的 `PKG_VERSION` 和 `PKG_RELEASE` 读取；当前为 `2.4.0-1`。
+
+### GitHub 自动构建并发布 Release
+
+仓库已提供 `.github/workflows/release.yml`。推送版本标签后，GitHub Actions
+先运行更新器及模块测试，再打包；全部成功后自动创建正式 Release，上传 `.ipk`
+和同名 `.ipk.sha256.txt`，并将它设为 Latest。无需手动上传附件。
+
+1. 修改 `Makefile` 的 `PKG_VERSION`，例如 `2.4.0`，并提交推送到 GitHub。
+2. 创建与该版本完全一致的标签并推送：
+
+   ```sh
+   git tag v2.4.0
+   git push github v2.4.0
+   ```
+
+3. 到 GitHub **Actions → Build and publish release** 查看执行结果；成功后在
+   **Releases** 中可以下载安装包。
+
+也可以在同一个 Actions 页面点击 **Run workflow**，选择要发布的分支。
+工作流会按该分支 `Makefile` 的版本创建标签和 Release。同一个版本只发布一次；
+后续发布需要提升 `PKG_VERSION`。发布工作流需要仓库允许 GitHub Actions 运行，
+其 `GITHUB_TOKEN` 的写权限已通过工作流的 `contents: write` 声明。
+
+更新器只读取 `azurekiln2333/luci-app-hstc-drcom-auth` 的最新正式 Release。
+例如 `v2.4.0` 必须包含 `luci-app-drcom-auth_2.4.0-1_all.ipk` 和
+`luci-app-drcom-auth_2.4.0-1_all.ipk.sha256.txt`，两个文件由同一次构建生成。
+请勿手动用其他版本或其他包名替换附件。
+
+### 设置页自动更新
+
+先手动安装一次带更新功能的版本，然后打开 **Dr.COM → 设置 → 插件更新**。
+可以立即检查、安装，或者打开定时自动更新，选择每天的小时和分钟并点击
+**保存并应用**。默认关闭；默认时间为每天 **04:00**，使用路由器本地时区。
+更新计划独立于认证服务的启用开关。
+
+自动更新会检查 GitHub 正式 Release，只安装比当前版本新的包，校验 SHA-256，
+并通过 `opkg` 安装。现有账号及配置由包管理器保留；不会重刷固件，也不会安装
+预发布版本。下载或校验失败时保留当前版本，状态栏显示原因，下次计划再试。
+路由器需要能够访问 GitHub API 和 Release 附件。当前支持使用 `opkg` 的 IPK
+系统；使用 `apk` 的固件会显示不支持。
 
 ## 安装与使用
 
 ```sh
-opkg install luci-app-drcom-auth_1.0.0-1_all.ipk
+opkg update
+opkg install luci-app-drcom-auth_2.4.0-1_all.ipk
 /etc/init.d/drcom_auth enable
 ```
 
@@ -205,7 +248,8 @@ postinst 会在升级后自动补齐**缺失**的新选项（如 `hscas_url`）�
 
 ## 依赖
 
-- 运行时：`curl`、`openssl-util`（RSA 密码加密）
+- 运行时：`curl`、`openssl-util`（RSA 密码加密）、`jsonfilter`（Release 元数据）、
+  `ca-bundle`（HTTPS 证书校验）、`flock`（防止并发更新）
 - LuCI：`luci-base`
 - 构建：OpenWrt SDK 或 buildroot
 

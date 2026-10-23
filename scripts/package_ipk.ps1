@@ -2,7 +2,7 @@ param(
     [string]$PackageRoot = ".",
     [string]$OutputDir = ".\release",
     [string]$PackageName = "luci-app-drcom-auth",
-    [string]$Version = "1.0.0-1",
+    [string]$Version = "",
     [string]$Architecture = "all"
 )
 
@@ -109,6 +109,18 @@ function Test-IsTextPackagePath {
 }
 
 $packageRootPath = Resolve-Path -LiteralPath $PackageRoot
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $makefile = [System.IO.File]::ReadAllText((Join-Path $packageRootPath "Makefile"))
+    $versionMatch = [regex]::Match($makefile, '(?m)^PKG_VERSION\s*:?=\s*([^\r\n#]+)')
+    $releaseMatch = [regex]::Match($makefile, '(?m)^PKG_RELEASE\s*:?=\s*([^\r\n#]+)')
+    if (-not $versionMatch.Success -or -not $releaseMatch.Success) {
+        throw "Makefile must define PKG_VERSION and PKG_RELEASE"
+    }
+    $Version = $versionMatch.Groups[1].Value.Trim() + "-" + $releaseMatch.Groups[1].Value.Trim()
+}
+if ($Version -notmatch '^[0-9][A-Za-z0-9.+~\-]*-[0-9]+$') {
+    throw "Invalid package version: $Version"
+}
 $outputPath = Join-Path (Resolve-Path -LiteralPath ".").Path $OutputDir
 New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
 
@@ -169,7 +181,7 @@ Architecture: $Architecture
 Maintainer: azurekiln
 Section: luci
 Priority: optional
-Depends: libc, luci-base, curl, openssl-util
+Depends: libc, luci-base, curl, openssl-util, jsonfilter, ca-bundle, flock
 Installed-Size: $installedSize
 Description: LuCI panel for HSTC Dr.COM captive-portal authentication
 "@

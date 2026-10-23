@@ -1,0 +1,57 @@
+name: Build and publish release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate tag and build IPK
+        shell: pwsh
+        env:
+          TRIGGER_EVENT: ${{ github.event_name }}
+          TRIGGER_REF: ${{ github.ref_name }}
+        run: |
+          $makefile = Get-Content -LiteralPath Makefile -Raw
+          $version = [regex]::Match($makefile, '(?m)^PKG_VERSION:=([^\r\n]+)').Groups[1].Value.Trim()
+          $tag = "v$version"
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'PKG_VERSION must use major.minor.patch' }
+          if ($env:TRIGGER_EVENT -eq 'push' -and $env:TRIGGER_REF -ne $tag) {
+            throw "Release tag must match Makefile PKG_VERSION: v$version"
+          }
+          $tagRef = git for-each-ref --format='%(refname)' "refs/tags/$tag"
+          if ($tagRef) {
+            $tagCommit = git rev-list -n 1 "refs/tags/$tag"
+            if ($tagCommit -ne (git rev-parse HEAD)) {
+              throw 'The version tag already points to another commit; bump PKG_VERSION'
+            }
+          }
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          node ./scripts/test_modules.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Module checks failed' }
+          node ./scripts/test_update_ui.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Updater UI checks failed' }
+          node ./scripts/test_cas_account_isolation.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic account checks failed' }
+          & 'C:/Program Files/Git/bin/sh.exe' ./scripts/test_update.sh
+          if ($LASTEXITCODE -ne 0) { throw 'Updater backend checks failed' }
+          ./scripts/package_ipk.ps1
+      - name: Create release and upload installer and checksum
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $assets = @(Get-ChildItem -LiteralPath release -File | Where-Object { $_.Name -like '*.ipk' -or $_.Name -like '*.ipk.sha256.txt' })
+          if ($assets.Count -ne 2) { throw 'Expected one IPK and its checksum' }
+          gh release create $env:RELEASE_TAG @($assets.FullName) --target $env:GITHUB_SHA --title $env:RELEASE_TAG --generate-notes --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
