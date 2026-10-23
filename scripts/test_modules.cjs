@@ -68,9 +68,9 @@ function loadModule(file) {
     }
     return {};
   });
-  // Evaluate with (window, document, L, ...deps)
-  const factory = new Function('window', 'document', 'L', 'E', args.join(', '), src);
-  const cls = factory({ localStorage: { getItem: () => null } }, {}, {}, E, ...resolved);
+  // Stub the browser language so host Node/runner locale cannot change assertions.
+  const factory = new Function('window', 'document', 'navigator', 'L', 'E', args.join(', '), src);
+  const cls = factory({ localStorage: { getItem: () => null } }, {}, { language: 'zh-CN' }, {}, E, ...resolved);
   if (!stubs.baseclass.isSubclass(cls))
     throw new Error('module factory did not yield a baseclass subclass: ' + file);
   return cls;
