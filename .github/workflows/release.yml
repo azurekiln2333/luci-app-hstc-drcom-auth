@@ -29,9 +29,13 @@ jobs:
             throw "Release tag must match Makefile PKG_VERSION: v$version"
           }
           $tagRef = git for-each-ref --format='%(refname)' "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to inspect release tags' }
           if ($tagRef) {
             $tagCommit = git rev-list -n 1 "refs/tags/$tag"
-            if ($tagCommit -ne (git rev-parse HEAD)) {
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to resolve the release tag' }
+            $headCommit = git rev-parse HEAD
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to resolve the build commit' }
+            if ($tagCommit -ne $headCommit) {
               throw 'The version tag already points to another commit; bump PKG_VERSION'
             }
           }
