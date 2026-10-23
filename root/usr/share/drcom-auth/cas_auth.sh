@@ -30,7 +30,7 @@
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-CONFIG_FILE="$SCRIPT_DIR/config.sh"
+CONFIG_FILE="${DRCOM_CAS_CONFIG_FILE:-$SCRIPT_DIR/config.sh}"
 if [ -f "$CONFIG_FILE" ]; then
 	. "$CONFIG_FILE"
 else

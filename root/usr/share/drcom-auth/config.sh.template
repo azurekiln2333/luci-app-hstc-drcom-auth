@@ -76,7 +76,7 @@ CAS_PUBLIC_KEY_FILE="$SCRIPT_DIR/info/public_key.pem"
 # Bundled fallback copy shipped with the package.
 DEFAULT_PUBLIC_KEY_FILE="$SCRIPT_DIR/public_key.pem"
 
-RESPONSE_DIR="$SCRIPT_DIR/responses"
+RESPONSE_DIR="__RESPONSE_DIR__"
 POST_RESPONSE_CONTENT="$RESPONSE_DIR/post_response.html"
 GET_RESPONSE_CONTENT="$RESPONSE_DIR/get_response.html"
 THIRD_GET_RESPONSE_CONTENT="$RESPONSE_DIR/third_get_response.html"

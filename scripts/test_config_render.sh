@@ -5,12 +5,16 @@ cd "$(dirname "$0")/../root/usr/share/drcom-auth"
 
 sed_escape() { printf "%s" "$1" | sed -e 's/[\\&|]/\\&/g'; }
 
-APP_DIR=/usr/share/drcom-auth
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+APP_DIR="$TMP/app"
+RENDERED="$TMP/rendered.sh"
 UA='Mozilla/5.0 (test) a&b \x y|z'
 PW='p@ss&word\test|pipe'
 
 sed \
   -e "s|__SCRIPT_DIR__|$(sed_escape "$APP_DIR")|g" \
+  -e "s|__RESPONSE_DIR__|$(sed_escape "$APP_DIR/responses")|g" \
   -e "s|__ACCOUNT_ID__|$(sed_escape acc1)|g" \
   -e "s|__ACCOUNT_IDS__|$(sed_escape "acc1 acc2")|g" \
   -e "s|__USER_AGENT__|$(sed_escape "$UA")|g" \
@@ -22,20 +26,21 @@ sed \
   -e "s|__USERNAME__|$(sed_escape 202400000000)|g" \
   -e "s|__PASSWORD__|$(sed_escape "$PW")|g" \
   -e "s|__PING_HOST__|$(sed_escape baidu.com)|g" \
-  config.sh.template > /tmp/rendered.sh
+  config.sh.template > "$RENDERED"
 
-sh -n /tmp/rendered.sh
-grep -q '__' /tmp/rendered.sh && { echo "FAIL: unrendered placeholder"; grep -n '__' /tmp/rendered.sh; exit 1; }
+sh -n "$RENDERED"
+grep -q '__' "$RENDERED" && { echo "FAIL: unrendered placeholder"; grep -n '__' "$RENDERED"; exit 1; }
 
 # Source it in a sandbox and check exact values round-trip.
 # Stub `logger` (unavailable off-router) so sourcing the template is safe.
 logger() { :; }
-. /tmp/rendered.sh
+. "$RENDERED"
 [ "$USER_AGENT" = "$UA" ] || { echo "FAIL UA: [$USER_AGENT] != [$UA]"; exit 1; }
 [ "$PASSWORD" = "$PW" ] || { echo "FAIL PW: [$PASSWORD] != [$PW]"; exit 1; }
 [ "$WAN_PORT" = "eth1" ] || { echo "FAIL WAN_PORT"; exit 1; }
 [ "$ACCOUNT_ID" = "acc1" ] || { echo "FAIL ACCOUNT_ID"; exit 1; }
 [ "$ACCOUNTS" = "acc1 acc2" ] || { echo "FAIL ACCOUNTS"; exit 1; }
+[ "$RESPONSE_DIR" = "$APP_DIR/responses" ] || { echo "FAIL RESPONSE_DIR"; exit 1; }
 case "$COOKIE_DIR" in *"/accounts/acc1") ;; *) echo "FAIL COOKIE_DIR per-account: $COOKIE_DIR"; exit 1 ;; esac
 # The CAS public key must be global, not inside the per-account directory.
 [ "$CAS_PUBLIC_KEY_FILE" = "$APP_DIR/info/public_key.pem" ] || { echo "FAIL CAS_PUBLIC_KEY_FILE not global: $CAS_PUBLIC_KEY_FILE"; exit 1; }

@@ -81,10 +81,34 @@ _collect_account() {
 	ids="${ids:+$ids }$1"
 }
 
-# Render the runtime config from UCI using the shipped template.
+# Explicit accounts must name an existing account section, never an option or
+# a path. Do not resolve/migrate the global account for diagnostic commands.
+validate_cas_account() {
+	case "$1" in
+		''|*[!A-Za-z0-9_-]*)
+			echo "CAS: invalid account id: $1" >&2
+			return 1
+			;;
+	esac
+	[ "$(uci -q get "drcom_auth.$1")" = "account" ] || {
+		echo "CAS: no such account: $1" >&2
+		return 1
+	}
+}
+
+# Render the runtime config. Explicit accounts use an isolated output path;
+# omitted arguments retain the global active-account behavior.
 write_config() {
 	local enabled wan_port drcom_server_ip hscas_url account username password
-	local hscas_public_key_url mac_type user_agent ping_host account_ids
+	local hscas_public_key_url mac_type user_agent ping_host account_ids ids
+	local output_file="$CONFIG_FILE" response_dir="$APP_DIR/responses" explicit_account=""
+
+	if [ "$#" -gt 0 ]; then
+		explicit_account="$1"
+		validate_cas_account "$explicit_account" || return 1
+		output_file="${2:-$APP_DIR/info/accounts/$explicit_account/cas_config.sh}"
+		response_dir="$APP_DIR/info/accounts/$explicit_account/responses"
+	fi
 
 	config_load drcom_auth
 	uci_get enabled enabled 0
@@ -99,21 +123,33 @@ write_config() {
 	uci_get user_agent user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.121 Safari/537.36"
 	uci_get ping_host ping_host baidu.com
 
-	# Active account credentials (single resolution).
-	account=$(resolve_account)
-	account_ids=$(printf '%s' "$account" | cut -f4)
-	username=$(printf '%s' "$account" | cut -f2)
-	password=$(printf '%s' "$account" | cut -f3)
-	account=$(printf '%s' "$account" | cut -f1)
+	if [ -n "$explicit_account" ]; then
+		account="$explicit_account"
+		config_get username "$account" username ""
+		config_get password "$account" password ""
+		ids=""
+		config_foreach _collect_account account
+		account_ids="$ids"
+	else
+		# Active account credentials (single resolution).
+		account=$(resolve_account)
+		account_ids=$(printf '%s' "$account" | cut -f4)
+		username=$(printf '%s' "$account" | cut -f2)
+		password=$(printf '%s' "$account" | cut -f3)
+		account=$(printf '%s' "$account" | cut -f1)
+	fi
 	[ -n "$account" ] || account="default"
 	# The account id is used as a path component; keep it safe.
 	account=$(printf '%s' "$account" | tr -cd 'A-Za-z0-9_.-')
 	[ -n "$account" ] || account="default"
 
-	mkdir -p "$APP_DIR/logs" "$APP_DIR/info/accounts/$account" "$APP_DIR/responses"
+	mkdir -p "$APP_DIR/logs" "$APP_DIR/info/accounts/$account" "$response_dir" "$(dirname "$output_file")" || return 1
 
+	if ! (
+	umask 077
 	sed \
 		-e "s|__SCRIPT_DIR__|$(sed_escape "$APP_DIR")|g" \
+		-e "s|__RESPONSE_DIR__|$(sed_escape "$response_dir")|g" \
 		-e "s|__ACCOUNT_ID__|$(sed_escape "$account")|g" \
 		-e "s|__ACCOUNT_IDS__|$(sed_escape "$account_ids")|g" \
 		-e "s|__USER_AGENT__|$(sed_escape "$user_agent")|g" \
@@ -125,8 +161,13 @@ write_config() {
 		-e "s|__USERNAME__|$(sed_escape "$username")|g" \
 		-e "s|__PASSWORD__|$(sed_escape "$password")|g" \
 		-e "s|__PING_HOST__|$(sed_escape "$ping_host")|g" \
-		"$TEMPLATE_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
-	chmod 600 "$CONFIG_FILE"
+		"$TEMPLATE_FILE" > "$output_file.tmp.$$" &&
+		chmod 600 "$output_file.tmp.$$" &&
+		mv "$output_file.tmp.$$" "$output_file"
+	); then
+		rm -f "$output_file.tmp.$$"
+		return 1
+	fi
 }
 
 start_service() {
@@ -166,48 +207,61 @@ login() {
 	ticket "$@"
 }
 
+# Keep diagnostic config immutable for the lifetime of this invocation. The
+# subshell scopes cleanup and preserves the CAS command's exit status.
+run_cas() (
+	local command="$1" account config_file
+	shift
+	if [ "$#" -eq 0 ]; then
+		write_config || return 1
+		DRCOM_CAS_CONFIG_FILE="$CONFIG_FILE" /bin/sh "$APP_DIR/cas_auth.sh" "$command"
+		return $?
+	fi
+	[ "$#" -eq 1 ] || { echo "CAS: expected one account id" >&2; return 1; }
+	account="$1"
+	validate_cas_account "$account" || return 1
+	mkdir -p "$APP_DIR/info/accounts/$account" || return 1
+	config_file=$(mktemp "$APP_DIR/info/accounts/$account/cas_config.XXXXXX") || return 1
+	trap 'rm -f "$config_file"' EXIT
+	write_config "$account" "$config_file" || return 1
+	DRCOM_CAS_CONFIG_FILE="$config_file" /bin/sh "$APP_DIR/cas_auth.sh" "$command"
+)
+
 # Fetch the standalone CAS login page and save the session-bound parameters
 # (execution / currentMenu / failN / _eventId). No Dr.COM involvement.
 cas_params() {
-	write_config
-	/bin/sh "$APP_DIR/cas_auth.sh" params
+	run_cas params "$@"
 }
 
 # Show the assembled CAS login POST body (password already RSA encrypted and
 # every field url-encoded), for inspection and copy-paste.
 cas_body() {
-	write_config
-	/bin/sh "$APP_DIR/cas_auth.sh" body
+	run_cas body "$@"
 }
 
 # Perform a standalone CAS login and persist cookies under /usr/share/drcom-auth/info.
 cas_login() {
-	write_config
-	/bin/sh "$APP_DIR/cas_auth.sh" login
+	run_cas login "$@"
 }
 
 # Clear the credential lockout marker for the active account (manual connect).
 cas_clear_bad_credentials() {
-	write_config
-	/bin/sh "$APP_DIR/cas_auth.sh" clear_bad_credentials
+	run_cas clear_bad_credentials "$@"
 }
 
 # Report saved CAS parameters and cookie status.
 cas_status() {
-	write_config
-	/bin/sh "$APP_DIR/cas_auth.sh" status
+	run_cas status "$@"
 }
 
 # CAS login only when the stored cookie is missing or expired.
 cas_ensure() {
-	write_config
-	/bin/sh "$APP_DIR/cas_auth.sh" ensure
+	run_cas ensure "$@"
 }
 
 # Clear the local CAS session so params can be fetched fresh again.
 cas_logout() {
-	write_config
-	/bin/sh "$APP_DIR/cas_auth.sh" logout
+	run_cas logout "$@"
 }
 
 # --- account management -----------------------------------------------------

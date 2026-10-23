@@ -166,6 +166,7 @@ function parseAccounts(raw) {
 				tabAccounts: '账号管理',
 				accountsTab: '账号管理',
 				activeAccount: '当前账号',
+				diagnosticAccount: '诊断账号（仅本页）',
 				noAccounts: '尚无账号，请在下方添加。',
 				accountHint: '新增或管理账号请到「账号管理」标签页。',
 				accountAdd: '新增账号',
@@ -318,6 +319,7 @@ function parseAccounts(raw) {
 				tabAccounts: '帳號管理',
 				accountsTab: '帳號管理',
 				activeAccount: '目前帳號',
+				diagnosticAccount: '診斷帳號（僅本頁）',
 				noAccounts: '尚無帳號，請在下方新增。',
 				accountHint: '新增或管理帳號請到「帳號管理」頁籤。',
 				accountAdd: '新增帳號',
@@ -470,6 +472,7 @@ function parseAccounts(raw) {
 				tabAccounts: 'Accounts',
 				accountsTab: 'Accounts',
 				activeAccount: 'Active Account',
+				diagnosticAccount: 'Diagnostic Account (this page only)',
 				noAccounts: 'No accounts yet - add one below.',
 				accountHint: 'Add or manage accounts on the Accounts tab.',
 				accountAdd: 'Add Account',
@@ -825,9 +828,8 @@ function makeBaseHelpers(tr) {
 		box.style.display = '';
 	}
 
-	// Shared account selector used by the Online Auth and Diagnostics tabs, so
-	// both pages offer the same control bound to main.active_account. Returns the
-	// HTML for the <select> (or an idle hint when there are no accounts).
+	// Shared account selector, initially showing main.active_account. Returns
+	// the HTML for the <select> (or an idle hint when there are no accounts).
 	function accountSelectHtml(accounts) {
 		if (!accounts || !accounts.length)
 			return '<span class="drcom-result">' + htmlEscape(tr('noAccounts')) + '</span>';
@@ -840,9 +842,8 @@ function makeBaseHelpers(tr) {
 		return html + '</select>';
 	}
 
-	// Bind the account selector inside `root`. Switching sets the active account
-	// and then runs `afterSwitch` (e.g. refresh status/request and clear stale
-	// output) so every caller stays consistent.
+	// Bind the account selector inside `root`. Callers can own selection via
+	// `selectAccount`; otherwise switching persists main.active_account.
 	function wireAccountSelect(root, opts) {
 		opts = opts || {};
 		var sel = root && root.querySelector('#drcom-account-select');
@@ -851,7 +852,9 @@ function makeBaseHelpers(tr) {
 		sel.addEventListener('change', function() {
 			var id = sel.value;
 			sel.disabled = true;
-			fs.exec('/etc/init.d/drcom_auth', [ 'account_set_active', id ]).then(function() {
+			var selected = opts.selectAccount ? opts.selectAccount(id)
+				: fs.exec('/etc/init.d/drcom_auth', [ 'account_set_active', id ]);
+			Promise.resolve(selected).then(function() {
 				ui.addNotification(null, E('p', tr('accountSwitched')));
 				if (opts.afterSwitch)
 					return opts.afterSwitch(id);
@@ -874,8 +877,13 @@ function makeBaseHelpers(tr) {
 	}
 
 	// Read the CAS status and update the params / cookie rows.
-	function refreshCasStatus() {
-		return fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).then(function (res) {
+	function refreshCasStatus(accountId, isCurrent) {
+		var args = [ 'cas_status' ];
+		if (accountId != null)
+			args.push(accountId);
+		return fs.exec('/etc/init.d/drcom_auth', args).then(function (res) {
+			if (isCurrent && !isCurrent())
+				return {};
 			var raw = (res && res.stdout ? res.stdout : '').trim();
 			var values = {};
 			raw.split('\n').forEach(function (line) {
@@ -976,8 +984,13 @@ function makeBaseHelpers(tr) {
 	}
 
 	// Render the request/response once, from the saved params.
-	function loadCasRequest() {
-		return fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).then(function (res) {
+	function loadCasRequest(accountId, isCurrent) {
+		var args = [ 'cas_status' ];
+		if (accountId != null)
+			args.push(accountId);
+		return fs.exec('/etc/init.d/drcom_auth', args).then(function (res) {
+			if (isCurrent && !isCurrent())
+				return;
 			var raw = (res && res.stdout ? res.stdout : '').trim();
 			var marker = raw.indexOf('\n---request---\n');
 			if (marker >= 0) {

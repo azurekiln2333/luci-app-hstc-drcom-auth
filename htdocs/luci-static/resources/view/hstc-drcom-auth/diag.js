@@ -20,6 +20,27 @@ return view.extend({
 		var m, s, o, tr = common.makeTranslator();
 		var h = common.makeBaseHelpers(tr);
 		var accounts = common.parseAccounts(data[0]);
+		var diagnosticAccount = (accounts.filter(function(a) { return a.active; })[0] || accounts[0] || {}).id || '';
+		var casGeneration = 0;
+
+		// Capture the selection generation at dispatch: A -> B -> A must still
+		// discard responses from the first A selection.
+		var captureCasAccount = function() {
+			var id = diagnosticAccount, generation = casGeneration;
+			return {
+				id: id,
+				isCurrent: function() { return generation === casGeneration; }
+			};
+		};
+		var refreshDiagnosticCas = function(context) {
+			context = context || captureCasAccount();
+			if (!context.isCurrent())
+				return Promise.resolve();
+			return Promise.all([
+				h.refreshCasStatus(context.id, context.isCurrent),
+				h.loadCasRequest(context.id, context.isCurrent)
+			]);
+		};
 
 		// Query the Dr.COM portal state and render the decision details: the
 		// connectivity probe result and the uid/ip/session fields that were read,
@@ -115,8 +136,8 @@ return view.extend({
 		s.addremove = false;
 		s.description = tr('casStep');
 
-		// Active account: shared with the Online Auth tab (main.active_account).
-		o = s.option(form.DummyValue, '_cas_account', tr('activeAccount'));
+		// The initial selection follows Online Auth; later changes are local.
+		o = s.option(form.DummyValue, '_cas_account', tr('diagnosticAccount'));
 		o.rawhtml = true;
 		o.cfgvalue = function() {
 			return h.accountSelectHtml(accounts);
@@ -126,10 +147,13 @@ return view.extend({
 		o.inputtitle = tr('fetchCasParams');
 		o.inputstyle = 'apply';
 		o.onclick = function() {
+			var context = captureCasAccount();
 			var node = document.getElementById('drcom-cas-params-status');
 			if (node)
 				node.textContent = tr('casParamsFetching');
-			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_params' ]).then(function(res) {
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_params', context.id ]).then(function(res) {
+				if (!context.isCurrent())
+					return;
 				var node = document.getElementById('drcom-cas-params-status');
 				var output = (res && res.stdout ? res.stdout : '').trim();
 				if (/^diagnosis=/m.test(output) && !/\n---request---\n/.test(output)) {
@@ -144,10 +168,10 @@ return view.extend({
 					h.showDiag(tr('casParamsFailed'), output || h.execMessage(res));
 					return;
 				}
-				return h.refreshCasStatus().then(function() {
-					return h.loadCasRequest();
-				});
+				return refreshDiagnosticCas(context);
 			}).catch(function(e) {
+				if (!context.isCurrent())
+					return;
 				var node = document.getElementById('drcom-cas-params-status');
 				if (node)
 					node.textContent = tr('casParamsFailed');
@@ -172,10 +196,13 @@ return view.extend({
 		o.inputtitle = tr('doCasLogin');
 		o.inputstyle = 'apply';
 		o.onclick = function() {
+			var context = captureCasAccount();
 			var node = document.getElementById('drcom-cas-cookie-status');
 			if (node)
 				node.textContent = tr('casLoggingIn');
-			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_login' ]).then(function(res) {
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_login', context.id ]).then(function(res) {
+				if (!context.isCurrent())
+					return;
 				var output = (res && res.stdout ? res.stdout : '').trim();
 				var message = h.execMessage(res);
 				var failed = h.execFailed(res, message);
@@ -185,14 +212,13 @@ return view.extend({
 					h.showDiag(tr('casLoginFailed'), output || message);
 				else
 					ui.addNotification(null, E('p', text));
-				h.refreshDashboard();
-				h.loadCasRequest();
-				return h.refreshCasStatus();
+				return refreshDiagnosticCas(context);
 			}).catch(function(e) {
+				if (!context.isCurrent())
+					return;
 				var message = h.execMessage(e) || tr('casLoginFailed');
 				h.showDiag(tr('casLoginFailed'), message);
-				h.refreshDashboard();
-				return h.refreshCasStatus();
+				return refreshDiagnosticCas(context);
 			});
 		};
 
@@ -206,21 +232,26 @@ return view.extend({
 		o.inputtitle = tr('refreshCasStatus');
 		o.inputstyle = 'apply';
 		o.onclick = function() {
-			return h.refreshCasStatus();
+			return refreshDiagnosticCas();
 		};
 
 		o = s.option(form.Button, '_cas_logout', tr('casLogout'));
 		o.inputtitle = tr('doCasLogout');
 		o.inputstyle = 'reset';
 		o.onclick = function() {
-			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_logout' ]).then(function() {
+			var context = captureCasAccount();
+			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_logout', context.id ]).then(function() {
+				if (!context.isCurrent())
+					return;
 				ui.addNotification(null, E('p', tr('casLogoutDone')));
 				h.clearCasOutput();
-				return h.refreshCasStatus();
+				return refreshDiagnosticCas(context);
 			}).catch(function(e) {
+				if (!context.isCurrent())
+					return;
 				h.showDiag(tr('casLogout'), h.execMessage(e));
 				h.clearCasOutput();
-				return h.refreshCasStatus();
+				return refreshDiagnosticCas(context);
 			});
 		};
 
@@ -252,8 +283,7 @@ return view.extend({
 				// Auth changes the session/portal state: keep the status card and
 				// the CAS rows in sync, like the CAS login button does.
 				h.refreshDashboard();
-				h.refreshCasStatus();
-				h.loadCasRequest();
+				refreshDiagnosticCas();
 			}).catch(function(e) {
 				var node = document.getElementById('drcom-auth-status');
 				var message = h.execMessage(e) || tr('authFailed');
@@ -261,8 +291,7 @@ return view.extend({
 					node.textContent = h.diagSentence(message);
 				h.showDiag(tr('authFailed'), message);
 				h.refreshDashboard();
-				h.refreshCasStatus();
-				h.loadCasRequest();
+				refreshDiagnosticCas();
 			});
 		};
 
@@ -325,18 +354,27 @@ return view.extend({
 		return m.render().then(function(map) {
 			var viewNode = E('div', { 'class': 'drcom-auth-view' }, [ common.style(), map ]);
 
-			// Active account: shared with the Online Auth tab. Switching clears the
-			// previous account's request/response output before refreshing.
+			// Own selection here; the shared selector keeps Online Auth's default
+			// persistence behavior for callers without selectAccount.
 			h.wireAccountSelect(viewNode, {
-				afterSwitch: function() {
+				selectAccount: function(id) {
+					diagnosticAccount = id;
+					casGeneration++;
 					h.clearCasOutput();
-					return Promise.all([ h.refreshCasStatus(), h.loadCasRequest(), h.refreshDashboard() ]);
+					var paramsNode = document.getElementById('drcom-cas-params-status');
+					var cookieNode = document.getElementById('drcom-cas-cookie-status');
+					if (paramsNode)
+						paramsNode.textContent = tr('casParamsIdle');
+					if (cookieNode)
+						cookieNode.textContent = tr('casCookieUnknown');
+				},
+				afterSwitch: function() {
+					return refreshDiagnosticCas();
 				}
 			});
 
 			h.refreshDashboard();
-			h.refreshCasStatus();
-			h.loadCasRequest();
+			refreshDiagnosticCas();
 			// Run the verdict check once on open so the detail is populated.
 			runAuthCheck();
 			return viewNode;
