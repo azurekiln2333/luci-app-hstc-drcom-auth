@@ -147,7 +147,7 @@ check_release() {
 		fail_update 'The release is missing its matching IPK/checksum asset or has an unexpected download URL.'
 		return 1
 	}
-	if opkg compare-versions "$latest_version" gt "$current_version"; then
+	if opkg compare-versions "$latest_version" '>>' "$current_version"; then
 		state=available
 		message="Update available: $latest_version."
 	else
@@ -224,7 +224,7 @@ perform_install() {
 		fail_update 'Cannot re-read the installed version before installation.'
 		return 1
 	}
-	if ! opkg compare-versions "$latest_version" gt "$current_version"; then
+	if ! opkg compare-versions "$latest_version" '>>' "$current_version"; then
 		state=up_to_date
 		message='The installed version changed; no reinstall or downgrade was performed.'
 		save_state

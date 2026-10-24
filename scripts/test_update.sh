@@ -38,9 +38,17 @@ if command == "opkg":
     if args == ["status", "luci-app-drcom-auth"]:
         if has("fail_status"): sys.exit(1)
         print("Package: luci-app-drcom-auth\nVersion: " + read("version").strip() + "\nStatus: install user installed")
-    elif len(args) == 4 and args[0] == "compare-versions" and args[2] == "gt":
+    elif len(args) == 4 and args[0] == "compare-versions":
         def version(v): return tuple(map(int, re.split(r"[.-]", v)))
-        sys.exit(0 if version(args[1]) > version(args[3]) else 1)
+        left, right = version(args[1]), version(args[3])
+        # Match opkg: legacy '<'/'>' include equality; strict operators are '<<'/'>>'.
+        operators = {"<=": left <= right, "<": left <= right,
+                     ">=": left >= right, ">": left >= right,
+                     "<<": left < right, ">>": left > right, "=": left == right}
+        if args[2] not in operators:
+            print("Unknown operator: " + args[2], file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0 if operators[args[2]] else 1)
     elif len(args) == 2 and args[0] == "install" and Path(args[1]).is_file():
         hold("install")
         log("install.log", args[1])
@@ -63,7 +71,8 @@ elif command == "curl":
         if has("fail_api"): sys.exit(22)
         source = root / "fixtures" / "release.json"
     else:
-        assert url.startswith("https://github.com/azurekiln2333/luci-app-hstc-drcom-auth/releases/download/v2.4.0/")
+        tag = json.loads((root / "fixtures/release.json").read_text())["tag_name"]
+        assert url.startswith("https://github.com/azurekiln2333/luci-app-hstc-drcom-auth/releases/download/" + tag + "/")
         kind = "checksum" if url.endswith(".sha256.txt") else "package"
         if has("fail_" + kind): sys.exit(22)
         source = root / "fixtures" / ("checksum" if kind == "checksum" else "package.ipk")
@@ -185,8 +194,9 @@ control = archive([("control", f"Package: {package}\nVersion: {version}\nArchite
 data = archive([("debian-binary", "2.0\n"), ("control.tar.gz", control), ("data.tar.gz", archive([]))])
 (root / "fixtures/package.ipk").write_bytes(data)
 (root / "fixtures/checksum").write_bytes((hashlib.sha256(data).hexdigest() + " *" + name + "\r\n").encode())
-base = "https://github.com/azurekiln2333/luci-app-hstc-drcom-auth/releases/download/v2.4.0/"
-metadata = {"tag_name": "v2.4.0", "draft": False, "prerelease": False, "assets": [
+tag = "v" + version.rsplit("-", 1)[0]
+base = "https://github.com/azurekiln2333/luci-app-hstc-drcom-auth/releases/download/" + tag + "/"
+metadata = {"tag_name": tag, "draft": False, "prerelease": False, "assets": [
     {"name": name, "browser_download_url": base + name},
     {"name": name + ".sha256.txt", "browser_download_url": base + name + ".sha256.txt"}]}
 (root / "fixtures/release.json").write_text(json.dumps(metadata))
@@ -231,6 +241,20 @@ run check > "$TMP/result"
 contains "$TMP/result" 'latest_version=2.4.0-2'
 contains "$TMP/result" 'state=available'
 echo 'OK: check/update/equal/older versions and packaging release bumps'
+
+reset
+fixture 2.4.1-1
+printf '2.4.0-1\n' > "$TMP/version"
+run check > "$TMP/result"
+contains "$TMP/result" 'current_version=2.4.0-1'
+contains "$TMP/result" 'latest_version=2.4.1-1'
+contains "$TMP/result" 'state=available'
+run install > "$TMP/start"
+contains "$TMP/start" 'state=installing'
+await_terminal installed
+contains "$TMP/result" 'current_version=2.4.1-1'
+[ "$(wc -l < "$TMP/install.log" | tr -d ' ')" -eq 1 ] || fail '2.4.0 to 2.4.1 update did not install exactly once'
+echo 'OK: 2.4.0-1 detects and installs 2.4.1-1 using opkg strict comparison'
 
 for kind in bad_tag prerelease draft missing_checksum foreign_url duplicate wrong_version malformed_json; do
 	reset
