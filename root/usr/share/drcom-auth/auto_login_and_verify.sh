@@ -6,14 +6,17 @@
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-CONFIG_FILE="$SCRIPT_DIR/config.sh"
+CONFIG_FILE="${DRCOM_CONFIG_FILE:-$SCRIPT_DIR/config.sh}"
 if [ ! -f "$CONFIG_FILE" ]; then
 	echo "The config.sh is not found" >&2
 	exit 1
 fi
 . "$CONFIG_FILE"
 
-AUTHORIZE_URI=$(/bin/sh "$SCRIPT_DIR/get_authorize_url.sh")
+AUTHORIZE_URI="${1:-}"
+if [ -z "$AUTHORIZE_URI" ]; then
+	AUTHORIZE_URI=$(/bin/sh "$SCRIPT_DIR/get_authorize_url.sh") || exit 1
+fi
 if [ -n "$AUTHORIZE_URI" ]; then
 	output_status "$STATUS_LOG_FILE" "Attempting to login to HSCAS..."
 	/bin/sh "$SCRIPT_DIR/hscas_login.sh" "$AUTHORIZE_URI"

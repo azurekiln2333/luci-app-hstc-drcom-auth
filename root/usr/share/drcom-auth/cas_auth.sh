@@ -30,7 +30,7 @@
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-CONFIG_FILE="${DRCOM_CAS_CONFIG_FILE:-$SCRIPT_DIR/config.sh}"
+CONFIG_FILE="${DRCOM_CAS_CONFIG_FILE:-${DRCOM_CONFIG_FILE:-$SCRIPT_DIR/config.sh}}"
 if [ -f "$CONFIG_FILE" ]; then
 	. "$CONFIG_FILE"
 else
@@ -577,10 +577,10 @@ cas_cookie_valid() {
 # `etime` is a billing-period end rather than a session timeout, so neither the
 # Dr.COMWebLoginID marker nor etime can tell whether we are really online. The
 # reliable test is whether the network actually lets us through: fetch a
-# connectivity-check URL and treat HTTP 204/200 as online. The portal page is
+# connectivity-check URL and require HTTP 204. The portal page is
 # still consulted for the account / IP / session start.
 cmd_portal_status() {
-	local http_code page body uid ip stime etime now etime_s state rc probe_code
+	local http_code page body uid ip stime etime state rc probe_code
 
 	# 1) Real connectivity test.
 	probe_code=$(curl --connect-timeout 5 --max-time 8 -s -o /dev/null -w '%{http_code}' \
@@ -612,18 +612,7 @@ cmd_portal_status() {
 	# which is NOT a successful auth, so only 204 counts as online here.
 	case "$probe_code" in
 		204) state=online ;;
-		*)
-			state=offline
-			# Fall back to the portal's own session fields: a non-empty uid plus a
-			# session end in the future means the portal still holds a session.
-			if [ -n "$uid" ] && [ -n "$stime" ] && [ -n "$etime" ]; then
-				now=$(date '+%s' 2>/dev/null || echo 0)
-				etime_s=$(date -d "$etime" '+%s' 2>/dev/null || echo 0)
-				if [ "$etime_s" -gt 0 ] 2>/dev/null && [ "$etime_s" -gt "$now" ]; then
-					state=online
-				fi
-			fi
-			;;
+		*) state=offline ;;
 	esac
 
 	printf 'portal=%s\n' "$state"

@@ -28,7 +28,7 @@
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-CONFIG_FILE="$SCRIPT_DIR/config.sh"
+CONFIG_FILE="${DRCOM_CONFIG_FILE:-$SCRIPT_DIR/config.sh}"
 if [ -f "$CONFIG_FILE" ]; then
 	. "$CONFIG_FILE"
 else
@@ -74,10 +74,20 @@ fi
 
 output_status "$LOG_FILE" "Received AUTHORIZE URI: $AUTHORIZE_URI"
 output_status "$LOG_FILE" "Loading HSCAS login page to fetch execution token"
-LOGIN_PAGE_RESPONSE=$(curl -L -c "$COOKIE_FILE" -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -o "$LOGIN_PAGE_CONTENT" -w "%{http_code}" "$AUTHORIZE_URI")
+LOGIN_PAGE_RESPONSE=$(curl --connect-timeout "${CAS_CONNECT_TIMEOUT:-10}" --max-time "${CAS_MAX_TIME:-30}" -L -c "$COOKIE_FILE" -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -o "$LOGIN_PAGE_CONTENT" -w "%{http_code}" "$AUTHORIZE_URI")
 
 EXECUTION=$(cas_form_field "$CAS_LOGIN_FORM_ID" execution)
 if [ -z "$EXECUTION" ]; then
+	# An existing CAS session may follow the service redirect all the way to
+	# Dr.COM instead of rendering fm1. Accept that only when the same status
+	# reader used by Diagnostics proves this exact account is already online.
+	PORTAL_STATUS=$(DRCOM_CAS_CONFIG_FILE="$CONFIG_FILE" /bin/sh "$SCRIPT_DIR/cas_auth.sh" portal_status 2>/dev/null)
+	PORTAL_STATE=$(printf '%s\n' "$PORTAL_STATUS" | sed -n 's/^portal=//p')
+	PORTAL_ACCOUNT=$(printf '%s\n' "$PORTAL_STATUS" | sed -n 's/^portal_uid=//p')
+	if [ "$PORTAL_STATE" = online ] && [ -n "$USERNAME" ] && [ "$PORTAL_ACCOUNT" = "$USERNAME" ]; then
+		output_status "$STATUS_LOG_FILE" 'Dr.COM already authenticates the selected account.'
+		exit 0
+	fi
 	output_status "$STATUS_LOG_FILE" "HSCAS login failed: execution token not found in form $CAS_LOGIN_FORM_ID, HTTP $LOGIN_PAGE_RESPONSE"
 	exit 1
 fi
@@ -105,7 +115,7 @@ fi
 
 if [ ! -s "$PUBLIC_KEY_FILE" ]; then
 	output_status "$LOG_FILE" "Fetching HSCAS RSA public key"
-	if ! curl -L -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -o "$PUBLIC_KEY_FILE" "$HSCAS_PUBLIC_KEY_URL"; then
+	if ! curl --connect-timeout "${CAS_CONNECT_TIMEOUT:-10}" --max-time "${CAS_MAX_TIME:-30}" -L -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -o "$PUBLIC_KEY_FILE" "$HSCAS_PUBLIC_KEY_URL"; then
 		output_status "$STATUS_LOG_FILE" "HSCAS login failed: public key request failed"
 		exit 1
 	fi
@@ -156,7 +166,7 @@ if [ -z "$ENCRYPTED_PASSWORD" ]; then
 fi
 
 output_status "$LOG_FILE" "Executing POST request to $AUTHORIZE_URI"
-POST_RESPONSE=$(curl -c "$COOKIE_FILE" -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -X POST -s -D "$HEADERS_FILE" -o "$POST_RESPONSE_CONTENT" -w "%{http_code}" \
+POST_RESPONSE=$(curl --connect-timeout "${CAS_CONNECT_TIMEOUT:-10}" --max-time "${CAS_MAX_TIME:-30}" -c "$COOKIE_FILE" -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -X POST -s -D "$HEADERS_FILE" -o "$POST_RESPONSE_CONTENT" -w "%{http_code}" \
 	--data-urlencode "username=$USERNAME" \
 	--data-urlencode "password=$ENCRYPTED_PASSWORD" \
 	--data-urlencode "currentMenu=$CURRENT_MENU" \
@@ -189,7 +199,7 @@ if [ "$POST_RESPONSE" -eq 302 ]; then
 	if [ -n "$LOCATION" ]; then
 		output_status "$STATUS_LOG_FILE" "Ticket obtained successfully: $LOCATION"
 		output_status "$STATUS_LOG_FILE" "Verifying ticket..."
-		THIRD_GET_RESPONSE=$(curl -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -o "$THIRD_GET_RESPONSE_CONTENT" -w "%{http_code}" "$LOCATION")
+		THIRD_GET_RESPONSE=$(curl --connect-timeout "${CAS_CONNECT_TIMEOUT:-10}" --max-time "${CAS_MAX_TIME:-30}" -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -o "$THIRD_GET_RESPONSE_CONTENT" -w "%{http_code}" "$LOCATION")
 		if [ "$THIRD_GET_RESPONSE" -eq 302 ]; then
 			output_status "$STATUS_LOG_FILE" "Ticket verification successful."
 			exit 0
@@ -202,13 +212,13 @@ elif [ "$POST_SUCCESS" = true ] && [ "$POST_RESPONSE" -eq 200 ]; then
 	output_status "$STATUS_LOG_FILE" "Log In hstc Successful."
 	output_status "$STATUS_LOG_FILE" "Executing GET request to $AUTHORIZE_URI to get ticket."
 
-	curl -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -D "$HEADERS_FILE" -o "$GET_RESPONSE_CONTENT" "$AUTHORIZE_URI"
+	curl --connect-timeout "${CAS_CONNECT_TIMEOUT:-10}" --max-time "${CAS_MAX_TIME:-30}" -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -D "$HEADERS_FILE" -o "$GET_RESPONSE_CONTENT" "$AUTHORIZE_URI"
 	GET_RESPONSE=$(awk 'NR == 1 { print $2 }' "$HEADERS_FILE")
 	if [ "$GET_RESPONSE" -eq 302 ]; then
 		LOCATION=$(grep -i "^Location:" "$HEADERS_FILE" | awk '{print $2}' | tr -d '\r')
 		output_status "$STATUS_LOG_FILE" "Ticket obtained successfully: $LOCATION"
 		output_status "$STATUS_LOG_FILE" "Verifying ticket..."
-		THIRD_GET_RESPONSE=$(curl -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -o "$THIRD_GET_RESPONSE_CONTENT" -w "%{http_code}" "$LOCATION")
+		THIRD_GET_RESPONSE=$(curl --connect-timeout "${CAS_CONNECT_TIMEOUT:-10}" --max-time "${CAS_MAX_TIME:-30}" -b "$COOKIE_FILE" -H "User-Agent: $USER_AGENT" -s -o "$THIRD_GET_RESPONSE_CONTENT" -w "%{http_code}" "$LOCATION")
 		if [ "$THIRD_GET_RESPONSE" -eq 302 ]; then
 			output_status "$STATUS_LOG_FILE" "Ticket verification successful."
 			exit 0

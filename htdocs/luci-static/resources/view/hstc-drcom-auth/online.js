@@ -27,6 +27,7 @@ return view.extend({
 		var ifaceLogical = ifaceInfo.logical || {};
 		var ifaceIps = ifaceInfo.ips || {};
 		var savedWanPort = ifaceInfo.current || '';
+		var accountGeneration = 0, connectRequest = null;
 
 		m = new form.Map('drcom_auth', tr('title'), tr('desc'));
 
@@ -91,20 +92,33 @@ return view.extend({
 		o.inputtitle = tr('connectNow');
 		o.inputstyle = 'apply';
 		o.description = tr('connectNowDesc');
-		o.onclick = function() {
+		o.onclick = function(ev) {
+			if (connectRequest)
+				return connectRequest;
+			var select = document.getElementById('drcom-account-select');
+			var account = select && select.value;
+			if (!account)
+				return Promise.resolve();
+			var generation = accountGeneration;
+			var isCurrent = function() {
+				return generation === accountGeneration && select.value === account;
+			};
+			var button = ev && ev.currentTarget;
+			if (button)
+				button.disabled = true;
 			var node = document.getElementById('drcom-connect-status');
 			if (node)
 				node.textContent = tr('connectRunning');
-			// Manual connect is an explicit action: drop the lockout marker first so
-			// the login is actually attempted.
-			return fs.exec('/etc/init.d/drcom_auth', [ 'cas_clear_bad_credentials' ]).catch(function() {}).then(function() {
-				return fs.exec('/etc/init.d/drcom_auth', [ 'cas_ensure' ]);
-			}).then(function(res) {
+			// The backend owns the same authorization/CAS/Dr.COM stages as Diagnostics.
+			// Capture the chosen account even if its active-account write is pending.
+			connectRequest = fs.exec('/etc/init.d/drcom_auth', [ 'authenticate', account ]).then(function(res) {
+				if (!isCurrent())
+					return;
 				var node = document.getElementById('drcom-connect-status');
 				var message = h.execMessage(res);
-				var failed = h.execFailed(res, message);
-				if (/^diagnosis=/m.test(message))
-					failed = true;
+				var result = h.parseDiag(res && res.stdout);
+				var failed = !res || res.code !== 0 || h.execFailed(res, message) ||
+					result.authenticated !== '1' || result.stage !== 'complete' || result.portal !== 'online';
 				// Only a short sentence here; the raw output lives on the
 				// Diagnostics tab.
 				var text = failed
@@ -113,15 +127,24 @@ return view.extend({
 				if (node)
 					node.textContent = text;
 				ui.addNotification(null, E('p', text), failed ? 'error' : undefined);
-				return h.refreshCasStatus();
 			}).catch(function(e) {
+				if (!isCurrent())
+					return;
 				var node = document.getElementById('drcom-connect-status');
 				var message = h.execMessage(e) || tr('connectFailed');
 				var text = h.diagSentence(message) + ' ' + tr('diagSeeDiagnostics');
 				if (node)
 					node.textContent = text;
 				ui.addNotification(null, E('p', text), 'error');
+			}).then(function() {
+				if (isCurrent())
+					return Promise.all([ h.refreshDashboard(account, isCurrent), h.refreshCasStatus(account, isCurrent) ]);
+			}).finally(function() {
+				connectRequest = null;
+				if (button)
+					button.disabled = false;
 			});
+			return connectRequest;
 		};
 
 		o = s.option(form.DummyValue, '_connect_status', tr('connectStatus'));
@@ -200,6 +223,13 @@ return view.extend({
 
 			// Account dropdown: switch the active account in place.
 			h.wireAccountSelect(viewNode, {
+				selectAccount: function(id) {
+					accountGeneration++;
+					var node = document.getElementById('drcom-connect-status');
+					if (node)
+						node.textContent = tr('connectIdle');
+					return fs.exec('/etc/init.d/drcom_auth', [ 'account_set_active', id ]);
+				},
 				afterSwitch: function() {
 					h.clearCasOutput();
 					return Promise.all([ h.refreshCasStatus(), h.refreshDashboard() ]);

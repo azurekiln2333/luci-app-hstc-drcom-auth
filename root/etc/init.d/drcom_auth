@@ -8,8 +8,9 @@
 START=95
 STOP=10
 USE_PROCD=1
-EXTRA_COMMANDS="authorize ticket login overview cas_params cas_body cas_login cas_status cas_ensure cas_logout cas_clear_bad_credentials portal_status auth_trace public_key public_key_status accounts_list account_set_active account_upsert account_delete update_status update_check update_install update_schedule"
+EXTRA_COMMANDS="authorize authenticate ticket login overview cas_params cas_body cas_login cas_status cas_ensure cas_logout cas_clear_bad_credentials portal_status auth_trace public_key public_key_status accounts_list account_set_active account_upsert account_delete update_status update_check update_install update_schedule"
 EXTRA_HELP="	authorize		Get the Dr.COM authorize URL only
+	authenticate		Run all diagnostic authentication stages and verify connectivity
 	ticket			Run the full Dr.COM login flow now
 	login			Alias of ticket
 	cas_params		Fetch and save the standalone CAS login parameters
@@ -221,12 +222,84 @@ authorize() {
 }
 
 ticket() {
-	write_config
-	/bin/sh "$APP_DIR/auto_login_and_verify.sh" >/dev/null
+	run_auth ticket "$@"
 }
 
 login() {
 	ticket "$@"
+}
+
+# One manual attempt uses one account/config even if another RPC switches the
+# global account while its HTTP requests are in flight. The stages themselves
+# are the same scripts exposed by the diagnostic buttons, not a second login.
+run_auth() (
+	local action="$1" account config_file stage_output authorize_uri rc
+	umask 077
+	shift
+	[ "$#" -le 1 ] || { echo 'diagnosis=expected one account id'; return 1; }
+	if [ "$#" -eq 1 ]; then
+		account="$1"
+	else
+		account=$(resolve_account | cut -f1)
+	fi
+	validate_cas_account "$account" || return 1
+	mkdir -p "$APP_DIR/info/accounts/$account" || return 1
+	config_file=$(mktemp "$APP_DIR/info/accounts/$account/auth_config.XXXXXX") || return 1
+	stage_output="$config_file.output"
+	trap 'rm -f "$config_file" "$stage_output"' EXIT
+	write_config "$account" "$config_file" || return 1
+	export DRCOM_CONFIG_FILE="$config_file" DRCOM_CAS_CONFIG_FILE="$config_file"
+	if [ "$action" = ticket ]; then
+		/bin/sh "$APP_DIR/auto_login_and_verify.sh"
+		return $?
+	fi
+
+	# Keep raw request bodies and cookies out of the one-click RPC response.
+	# Only the failed stage and a known diagnosis are returned to the UI.
+	auth_failure() {
+		printf 'authenticated=0\nstage=%s\n' "$1"
+		if grep -q '^diagnosis=bad_credentials$' "$stage_output"; then
+			printf 'diagnosis=bad_credentials\n'
+		else
+			printf 'diagnosis=authentication failed\n'
+		fi
+		printf 'message=Authentication failed at %s. See Diagnostics for details.\n' "$1"
+	}
+	/bin/sh "$APP_DIR/cas_auth.sh" clear_bad_credentials > "$stage_output" 2>&1 || {
+		rc=$?; auth_failure cas_login; return "$rc"
+	}
+	if authorize_uri=$(/bin/sh "$APP_DIR/get_authorize_url.sh" 2> "$stage_output") && [ -n "$authorize_uri" ]; then
+		:
+	else
+		rc=$?; [ "$rc" -ne 0 ] || rc=1
+		auth_failure authorize; return "$rc"
+	fi
+	/bin/sh "$APP_DIR/cas_auth.sh" params > "$stage_output" 2>&1 || {
+		rc=$?; auth_failure cas_params; return "$rc"
+	}
+	# A success page has no form token. Reposting an old saved execution in
+	# this case would turn an already authenticated CAS session into a failure.
+	if ! grep -q '^diagnosis=already logged in$' "$stage_output"; then
+		/bin/sh "$APP_DIR/cas_auth.sh" login > "$stage_output" 2>&1 || {
+			rc=$?; auth_failure cas_login; return "$rc"
+		}
+	fi
+	/bin/sh "$APP_DIR/auto_login_and_verify.sh" "$authorize_uri" > "$stage_output" 2>&1 || {
+		rc=$?; auth_failure drcom; return "$rc"
+	}
+	/bin/sh "$APP_DIR/cas_auth.sh" portal_status > "$stage_output" 2>&1 || {
+		rc=$?; auth_failure verify; return "$rc"
+	}
+	if ! grep -q '^portal=online$' "$stage_output"; then
+		auth_failure verify
+		return 1
+	fi
+	printf 'authenticated=1\nstage=complete\n'
+	cat "$stage_output"
+)
+
+authenticate() {
+	run_auth authenticate "$@"
 }
 
 # Keep diagnostic config immutable for the lifetime of this invocation. The

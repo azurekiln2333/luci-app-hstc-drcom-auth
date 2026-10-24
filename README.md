@@ -107,7 +107,7 @@ pwsh ./scripts/package_ipk.ps1
 ```
 
 产物位于 `release/luci-app-drcom-auth_<version>_all.ipk` 及同名 `.sha256.txt`。
-默认版本从 `Makefile` 的 `PKG_VERSION` 和 `PKG_RELEASE` 读取；当前为 `2.4.2-1`。
+默认版本从 `Makefile` 的 `PKG_VERSION` 和 `PKG_RELEASE` 读取；当前为 `2.4.3-1`。
 
 ### GitHub 自动构建并发布 Release
 
@@ -115,12 +115,12 @@ pwsh ./scripts/package_ipk.ps1
 先运行更新器及模块测试，再打包；全部成功后自动创建正式 Release，上传 `.ipk`
 和同名 `.ipk.sha256.txt`，并将它设为 Latest。无需手动上传附件。
 
-1. 修改 `Makefile` 的 `PKG_VERSION`，例如 `2.4.2`，并提交推送到 GitHub。
+1. 修改 `Makefile` 的 `PKG_VERSION`，例如 `2.4.3`，并提交推送到 GitHub。
 2. 创建与该版本完全一致的标签并推送：
 
    ```sh
-   git tag v2.4.2
-   git push github v2.4.2
+   git tag v2.4.3
+   git push github v2.4.3
    ```
 
 3. 到 GitHub **Actions → Build and publish release** 查看执行结果；成功后在
@@ -132,8 +132,8 @@ pwsh ./scripts/package_ipk.ps1
 其 `GITHUB_TOKEN` 的写权限已通过工作流的 `contents: write` 声明。
 
 更新器只读取 `azurekiln2333/luci-app-hstc-drcom-auth` 的最新正式 Release。
-例如 `v2.4.2` 必须包含 `luci-app-drcom-auth_2.4.2-1_all.ipk` 和
-`luci-app-drcom-auth_2.4.2-1_all.ipk.sha256.txt`，两个文件由同一次构建生成。
+例如 `v2.4.3` 必须包含 `luci-app-drcom-auth_2.4.3-1_all.ipk` 和
+`luci-app-drcom-auth_2.4.3-1_all.ipk.sha256.txt`，两个文件由同一次构建生成。
 请勿手动用其他版本或其他包名替换附件。
 
 ### 设置页自动更新
@@ -156,7 +156,7 @@ pwsh ./scripts/package_ipk.ps1
 
 ```sh
 opkg update
-opkg install luci-app-drcom-auth_2.4.2-1_all.ipk
+opkg install luci-app-drcom-auth_2.4.3-1_all.ipk
 /etc/init.d/drcom_auth enable
 ```
 
@@ -180,7 +180,9 @@ opkg install luci-app-drcom-auth_2.4.2-1_all.ipk
 
 # Dr.COM 认证链
 /etc/init.d/drcom_auth authorize            # 只取授权链接
-/etc/init.d/drcom_auth ticket               # 立即跑完整登录
+/etc/init.d/drcom_auth authenticate         # 一键完成授权、CAS 登录、Dr.COM 认证和状态确认
+/etc/init.d/drcom_auth authenticate acc1    # 全程使用指定账号
+/etc/init.d/drcom_auth ticket               # 只执行诊断页第三步：Dr.COM 登录
 /etc/init.d/drcom_auth public_key           # 更新公钥
 /etc/init.d/drcom_auth public_key_status    # 查看公钥缓存状态
 
@@ -210,6 +212,10 @@ tail -n 100 /usr/share/drcom-auth/logs/drcom_status_log.txt
 ```sh
 # 渲染 config.sh 模板（无需网络）
 sh ./scripts/test_config_render.sh
+
+# 一键完整认证流程及前端按钮回归（无需网络或真实账号）
+sh ./scripts/test_authenticate.sh
+node ./scripts/test_cas_account_isolation.cjs
 
 # 独立 CAS 登录（需要 curl + openssl；无 openssl 时可用 shim）
 USERNAME=... PASSWORD=... sh ./scripts/test_cas_login.sh

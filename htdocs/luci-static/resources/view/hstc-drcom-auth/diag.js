@@ -265,10 +265,13 @@ return view.extend({
 		o.inputtitle = tr('auth');
 		o.inputstyle = 'apply';
 		o.onclick = function() {
+			var context = captureCasAccount();
 			var node = document.getElementById('drcom-auth-status');
 			if (node)
 				node.textContent = tr('authRunning');
-			return fs.exec('/etc/init.d/drcom_auth', [ 'ticket' ]).then(function(res) {
+			return fs.exec('/etc/init.d/drcom_auth', [ 'ticket', context.id ]).then(function(res) {
+				if (!context.isCurrent())
+					return;
 				var node = document.getElementById('drcom-auth-status');
 				var output = (res && res.stdout ? res.stdout : '').trim();
 				var message = h.execMessage(res);
@@ -282,16 +285,16 @@ return view.extend({
 					ui.addNotification(null, E('p', sentence));
 				// Auth changes the session/portal state: keep the status card and
 				// the CAS rows in sync, like the CAS login button does.
-				h.refreshDashboard();
-				refreshDiagnosticCas();
+				return Promise.all([ h.refreshDashboard(context.id, context.isCurrent), refreshDiagnosticCas(context) ]);
 			}).catch(function(e) {
+				if (!context.isCurrent())
+					return;
 				var node = document.getElementById('drcom-auth-status');
 				var message = h.execMessage(e) || tr('authFailed');
 				if (node)
 					node.textContent = h.diagSentence(message);
 				h.showDiag(tr('authFailed'), message);
-				h.refreshDashboard();
-				refreshDiagnosticCas();
+				return Promise.all([ h.refreshDashboard(context.id, context.isCurrent), refreshDiagnosticCas(context) ]);
 			});
 		};
 
@@ -363,10 +366,13 @@ return view.extend({
 					h.clearCasOutput();
 					var paramsNode = document.getElementById('drcom-cas-params-status');
 					var cookieNode = document.getElementById('drcom-cas-cookie-status');
+					var authNode = document.getElementById('drcom-auth-status');
 					if (paramsNode)
 						paramsNode.textContent = tr('casParamsIdle');
 					if (cookieNode)
 						cookieNode.textContent = tr('casCookieUnknown');
+					if (authNode)
+						authNode.textContent = tr('authIdle');
 				},
 				afterSwitch: function() {
 					return refreshDiagnosticCas();

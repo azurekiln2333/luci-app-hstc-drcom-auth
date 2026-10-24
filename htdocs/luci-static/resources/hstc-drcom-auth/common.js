@@ -208,9 +208,9 @@ function parseAccounts(raw) {
 				accountSwitchFailed: '切换账号失败',
 				accountNeedUsername: '请填写用户名。',
 				connectNow: '一键登录并认证',
-				connectNowDesc: '确保已登录并执行联网检测；已登录时会自动跳过。',
+				connectNowDesc: '依次获取授权链接、登录 CAS、完成 Dr.COM 认证并检查联网状态。',
 				connectRunning: '认证中...',
-				connectDone: '已登录并完成联网检测。',
+				connectDone: 'Dr.COM 认证成功，已确认联网。',
 				connectFailed: '登录或认证失败',
 				connectStatus: '认证结果',
 				connectIdle: '未执行',
@@ -389,9 +389,9 @@ function parseAccounts(raw) {
 				accountSwitchFailed: '切換帳號失敗',
 				accountNeedUsername: '請填寫使用者名稱。',
 				connectNow: '一鍵登入並認證',
-				connectNowDesc: '確保已登入並執行連網偵測；已登入時會自動略過。',
+				connectNowDesc: '依序取得授權連結、登入 CAS、完成 Dr.COM 認證並檢查連網狀態。',
 				connectRunning: '認證中...',
-				connectDone: '已登入並完成連網偵測。',
+				connectDone: 'Dr.COM 認證成功，已確認連網。',
 				connectFailed: '登入或認證失敗',
 				connectStatus: '認證結果',
 				connectIdle: '未執行',
@@ -570,9 +570,9 @@ function parseAccounts(raw) {
 				accountSwitchFailed: 'Failed to switch account',
 				accountNeedUsername: 'Please enter a username.',
 				connectNow: 'Log In and Authenticate',
-				connectNowDesc: 'Ensure a login exists and run the connectivity check; skipped when already logged in.',
+				connectNowDesc: 'Get the authorization URL, log in to CAS, complete Dr.COM authentication, and verify connectivity.',
 				connectRunning: 'Authenticating...',
-				connectDone: 'Logged in and connectivity check completed.',
+				connectDone: 'Dr.COM authenticated and connectivity verified.',
 				connectFailed: 'Login or authentication failed',
 				connectStatus: 'Result',
 				connectIdle: 'Not run',
@@ -1003,11 +1003,16 @@ function makeBaseHelpers(tr) {
 	}
 
 	// Refresh the top status card.
-	function refreshDashboard() {
+	function refreshDashboard(accountId, isCurrent) {
+		var casArgs = [ 'cas_status' ];
+		if (accountId != null)
+			casArgs.push(accountId);
 		return Promise.all([
 			fs.exec('/etc/init.d/drcom_auth', [ 'overview' ]).catch(function () { return {}; }),
-			fs.exec('/etc/init.d/drcom_auth', [ 'cas_status' ]).catch(function () { return {}; })
+			fs.exec('/etc/init.d/drcom_auth', casArgs).catch(function () { return {}; })
 		]).then(function (res) {
+			if (isCurrent && !isCurrent())
+				return;
 			function st(r) { return ((r && r.stdout) || '').trim(); }
 			var net = st(res[0]);
 			var netNode = document.getElementById('drcom-status-network');

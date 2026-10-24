@@ -17,7 +17,7 @@ function status(id, suffix = '') {
 
 function runtime() {
 	const nodes = new Map(), options = new Map(), calls = [], notifications = [], pending = [];
-	let hold = null, globalAccount = 'accA';
+	let hold = null, response = null, globalAccount = 'accA';
 	class Node {
 		constructor(tag, attrs = {}, children = []) {
 			this.tag = tag; this.attrs = attrs || {}; this.children = [];
@@ -64,11 +64,16 @@ function runtime() {
 		ui: { addNotification(...args) { notifications.push(args); } },
 		fs: { exec(file, args) {
 			assert.equal(file, '/etc/init.d/drcom_auth'); calls.push(args.slice());
-			if (hold && hold(args)) return new Promise((resolve, reject) => pending.push({args: args.slice(), resolve, reject}));
-			if (args[0] === 'account_set_active') globalAccount = args[1];
 			const stdout = args[0] === 'cas_status' ? status(args.length > 1 ? args[1] : globalAccount)
-				: args[0] === 'overview' ? 'network=up\ndrcom=offline' : args[0] === 'portal_status' ? 'portal=offline' : '';
-			return Promise.resolve({ code: 0, stdout });
+				: args[0] === 'overview' ? 'network=up\ndrcom=offline' : args[0] === 'portal_status' ? 'portal=offline'
+				: args[0] === 'authenticate' ? 'authenticated=1\nstage=complete\nportal=online' : '';
+			const result = hold && hold(args)
+				? new Promise((resolve, reject) => pending.push({args: args.slice(), resolve, reject}))
+				: Promise.resolve(response && response(args) || { code: 0, stdout });
+			return result.then(res => {
+				if (args[0] === 'account_set_active' && !res.code) globalAccount = args[1];
+				return res;
+			});
 		} }
 	};
 	const document = { getElementById: id => nodes.get(id) || null };
@@ -82,6 +87,7 @@ function runtime() {
 		return stubs[name] = typeof result === 'function' ? new result() : result;
 	}
 	return { nodes, options, calls, notifications, pending, load, setHold: value => hold = value,
+		setResponse: value => response = value,
 		globalAccount: () => globalAccount,
 		async render(name) {
 			const view = load('view/hstc-drcom-auth/' + name);
@@ -145,14 +151,14 @@ async function staleReaders() {
 }
 
 async function staleActions() {
-	for (const command of ['cas_params', 'cas_login', 'cas_logout']) {
+	for (const command of ['cas_params', 'cas_login', 'cas_logout', 'ticket']) {
 		for (const reject of [false, true]) {
 			const r = runtime(), select = await r.render('diag');
 			r.setHold(args => args[0] === command);
-			const name = {cas_params: '_cas_params', cas_login: '_cas_login', cas_logout: '_cas_logout'}[command];
+			const name = {cas_params: '_cas_params', cas_login: '_cas_login', cas_logout: '_cas_logout', ticket: '_auth'}[command];
 			const action = r.options.get(name).onclick();
 			select.change('accB'); await tick(); select.change('accA'); await tick();
-			const ids = ['drcom-cas-params-status', 'drcom-cas-cookie-status', 'drcom-cas-body-box', 'drcom-cas-response-box'];
+			const ids = ['drcom-cas-params-status', 'drcom-cas-cookie-status', 'drcom-cas-body-box', 'drcom-cas-response-box', 'drcom-auth-status'];
 			const expected = ids.map(id => r.nodes.get(id).textContent), count = r.notifications.length;
 			const callCount = r.calls.length, p = r.pending.shift();
 			assert(p, command + ' is deferred');
@@ -167,8 +173,91 @@ async function staleActions() {
 	console.log('OK: stale CAS action success/error callbacks ignored across A/B/A changes');
 }
 
+async function diagnosticTicketAccount() {
+	const r = runtime(), select = await r.render('diag');
+	select.change('accB'); await tick(); r.calls.length = 0;
+	await r.options.get('_auth').onclick(); await tick();
+	assert.deepEqual(r.calls.find(c => c[0] === 'ticket'), ['ticket', 'accB'], 'Dr.COM uses the same diagnostic B account as CAS');
+	assert.equal(r.globalAccount(), 'accA', 'diagnostic Dr.COM does not switch the global account');
+	assert(r.calls.filter(c => c[0] === 'cas_status').every(c => c[1] === 'accB'), 'post-auth status readers keep diagnostic B');
+	console.log('OK: diagnostic Dr.COM ticket and completion readers use the selected local account');
+}
+
+const authenticated = 'authenticated=1\nstage=complete\nportal=online';
+const connectDone = 'Dr.COM authenticated and connectivity verified.';
+
+async function oneclickFlow() {
+	const r = runtime(), select = await r.render('online');
+	r.setHold(args => ['account_set_active', 'authenticate'].includes(args[0]));
+	r.calls.length = 0; select.change('accB'); await tick();
+	assert.equal(r.globalAccount(), 'accA', 'active-account write is still pending');
+	const button = {disabled: false}, action = r.options.get('_connect_now').onclick({currentTarget: button});
+	await tick();
+	assert.deepEqual(r.calls.filter(c => c[0] === 'authenticate'), [['authenticate', 'accB']], 'full flow captures B before the active-account write completes');
+	assert(button.disabled, 'connect button is disabled while authentication runs');
+	assert.equal(r.options.get('_connect_now').onclick(), action, 'duplicate clicks share one pending operation');
+	assert(!r.calls.some(c => ['cas_ensure', 'cas_clear_bad_credentials'].includes(c[0])), 'frontend never substitutes a CAS-cookie shortcut for full authentication');
+	r.pending.find(p => p.args[0] === 'authenticate').resolve({code: 0, stdout: 'diagnosis=already logged in\n' + authenticated});
+	await action; await tick();
+	assert.equal(r.nodes.get('drcom-connect-status').textContent, connectDone, 'complete Dr.COM protocol permits success even after an already-logged-in CAS message');
+	assert(!button.disabled, 'connect button is restored after completion');
+	assert(r.calls.some(c => c[0] === 'overview'), 'completion refreshes real Dr.COM/connectivity status');
+	assert(r.calls.filter(c => c[0] === 'cas_status').every(c => c[1] === 'accB'), 'completion CAS reads capture B while global account is still A');
+	r.pending.find(p => p.args[0] === 'account_set_active').resolve({code: 0, stdout: ''}); await tick();
+	assert.equal(r.globalAccount(), 'accB');
+	console.log('OK: one-click full backend flow, pending account switch, duplicate guard, exact success protocol and status refresh');
+}
+
+async function oneclickFailures() {
+	for (const result of [
+		{code: 1, stdout: 'stage=cas_login\ndiagnosis=bad_credentials'},
+		{code: 1, stdout: authenticated},
+		{code: 0, stdout: ''},
+		{code: 0, stdout: 'authenticated=1\nportal=online'},
+		{code: 0, stdout: 'authenticated=1\nportal=offline'},
+		{code: 0, stdout: 'portal=online'}
+	]) {
+		const r = runtime(); await r.render('online'); r.calls.length = 0;
+		r.setResponse(args => args[0] === 'authenticate' ? result : null);
+		await r.options.get('_connect_now').onclick(); await tick();
+		assert.notEqual(r.nodes.get('drcom-connect-status').textContent, connectDone, 'failed or incomplete protocol never reports connected');
+		assert.equal(r.notifications.at(-1)[2], 'error', 'failure produces an error notification');
+		assert(r.calls.some(c => c[0] === 'overview'), 'failure also refreshes real connectivity');
+		assert(r.calls.some(c => c[0] === 'cas_status' && c[1] === 'accA'), 'failure refreshes the captured CAS account');
+	}
+	const r = runtime(); await r.render('online');
+	r.setHold(args => args[0] === 'authenticate');
+	const action = r.options.get('_connect_now').onclick(); await tick();
+	r.pending[0].reject({message: 'RPC transport failed'});
+	await action; await tick();
+	assert.notEqual(r.nodes.get('drcom-connect-status').textContent, connectDone);
+	assert.equal(r.notifications.at(-1)[2], 'error');
+	console.log('OK: backend failure, empty/incomplete success, offline verdict and RPC errors cannot report one-click success');
+}
+
+async function staleOneclick() {
+	for (const reject of [false, true]) {
+		const r = runtime(), select = await r.render('online');
+		r.setHold(args => args[0] === 'authenticate');
+		const action = r.options.get('_connect_now').onclick();
+		select.change('accB'); await tick(); select.change('accA'); await tick();
+		const expected = r.nodes.get('drcom-connect-status').textContent, notificationCount = r.notifications.length, callCount = r.calls.length;
+		if (reject) r.pending[0].reject({message: 'old account error'});
+		else r.pending[0].resolve({code: 0, stdout: authenticated});
+		await action; await tick();
+		assert.equal(r.nodes.get('drcom-connect-status').textContent, expected, 'old one-click result does not overwrite the new selection');
+		assert.equal(r.notifications.length, notificationCount, 'old one-click result does not notify the new selection');
+		assert.equal(r.calls.length, callCount, 'old one-click result does not start stale status readers');
+	}
+	console.log('OK: one-click success and failure responses are ignored after A/B/A changes');
+}
+
 (async () => {
 	await localSelectionAndCommands();
+	await oneclickFlow();
 	await staleReaders();
 	await staleActions();
+	await diagnosticTicketAccount();
+	await oneclickFailures();
+	await staleOneclick();
 })().catch(error => { console.error(error); process.exitCode = 1; });

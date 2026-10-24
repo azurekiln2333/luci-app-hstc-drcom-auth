@@ -46,6 +46,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Updater UI checks failed' }
           node ./scripts/test_cas_account_isolation.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic account checks failed' }
+          & 'C:/Program Files/Git/bin/sh.exe' ./scripts/test_authenticate.sh
+          if ($LASTEXITCODE -ne 0) { throw 'Full authentication checks failed' }
           & 'C:/Program Files/Git/bin/sh.exe' ./scripts/test_update.sh
           if ($LASTEXITCODE -ne 0) { throw 'Updater backend checks failed' }
           ./scripts/package_ipk.ps1
